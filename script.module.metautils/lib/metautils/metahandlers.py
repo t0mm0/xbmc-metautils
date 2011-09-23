@@ -27,14 +27,18 @@ import sys
 import urllib
 import urllib2
 import base64
+import xbmcaddon
 
 #append lib directory
-sys.path.append((os.path.split(os.getcwd()))[0])
+addon = xbmcaddon.Addon(id='script.module.metautils')
+path = addon.getAddonInfo('path')
+
+sys.path.append((os.path.split(path))[0])
             
 from TMDB import TMDB
 #necessary to make it work on python 2.4 and 2.7
-try: from pysqlite2 import dbapi2 as sqlite
-except: from sqlite3 import dbapi2 as sqlite
+try: from sqlite3 import dbapi2 as sqlite
+except: from pysqlite2 import dbapi2 as sqlite
 
 def make_dir(mypath, dirname):
     #...creates sub-directories if they are not found.
@@ -77,7 +81,7 @@ class MetaData:
         if preparezip:
             #create container working directory
             #!!!!!Must be matched to workdir in metacontainers.py Create_Icefilms_Container()
-            workdir = os.path.join(os.getcwd(),'Generated Metacontainer')
+            workdir = os.path.join(path,'Generated Metacontainer')
             if not os.path.exists(workdir): os.makedirs(workdir)
             path = workdir
             
@@ -169,41 +173,17 @@ class MetaData:
 #--------------------------------Start of Movie cache handling code ----------------#
 
         
-    def get_meta(self, imdb_id, type, name, ice_url, refresh=False):
+    def get_meta(self, imdb_id, type, name, refresh=False):
 
         # add the tt if not found. integer aware.
         imdb_id=str(imdb_id)
         if not imdb_id.startswith('tt'):
                 imdb_id = "tt%s" % imdb_id
 
-        ### make the ice_id from the ice_url
-
-        if type == 'movie':
-            # get ice_id from url
-            ice_id=str(ice_url).replace('http://www.icefilms.info/ip.php?v=','')
-            if len(ice_id) > 0:
-                if ice_id.endswith('&') is False:
-                    ice_id = ice_id + '&'
-                    print ice_id
-            else:
-                ice_id = ''
-                print 'Could not find the url ice_id for movie: ',name
-                
-# stupid fix for movies with no imdb_id *** to-check ***   !!!!!!!!!!!!!!!!!!!!!!!! This fix needs to be removed ASAP, and the actual underlying problem dealt with.
-            if imdb_id == 'None':
-                imdb_id = ice_id
-
-        elif type == 'tvshow':
-            # get ice_id from url
-            ice_id=str(ice_url).replace('http://www.icefilms.info/tv/series/','')
-            if len(ice_id) == 0 or ice_id is None:
-                ice_id = ''
-                print 'Could not find the url ice_id for tv show: ',name
-
         if refresh:
             meta=None
         else:
-            self.check_video_for_url( ice_id, imdb_id, type )
+#            self.check_video_for_url( ice_id, imdb_id, type )
             meta = self._cache_lookup_movie_by_imdb(imdb_id, type)
 
         if not meta:
@@ -470,7 +450,7 @@ class MetaData:
 
         return meta
 
-    def get_episode_meta(self, imdb_id, season, episode, ice_id, refresh=False):
+    def get_episode_meta(self, imdb_id, season, episode, refresh=False):
 
         # add the tt if not found. integer aware.
         imdb_id=str(imdb_id)
@@ -513,7 +493,7 @@ class MetaData:
         if refresh:
             meta=None
         else:
-            self.check_video_for_url( ice_id, imdb_id, 'episode', tvdb_id=tvdb_id, season=season, episode=episode  )
+#            self.check_video_for_url( ice_id, imdb_id, 'episode', tvdb_id=tvdb_id, season=season, episode=episode  )
             meta = self._cache_lookup_episode(imdb_id, season, episode)#ep_num)
         
         if meta is None:
@@ -844,47 +824,7 @@ class MetaData:
                            "(:imdb_id, :tvdb_id, :season, :cover_url, :watched)",
                            meta
                            )
-        self.dbcon.commit()
-    
-    def get_movie_meta_by_url(self, ice_id, refresh=False):
-
-        if refresh:
-            meta=None
-        else:
-            meta = self._cache_lookup_by_url(ice_id)
-
-        #Clean some unicode stuff
-        try:
-            meta['plot']=cleanUnicode(str(meta['plot']))
-        except:
-            print 'could not clean plot'
-            
-        #Return the values to XBMC
-        return meta
-    
-    def _cache_lookup_by_url(self, ice_id):
-        
-        # select * is easier since we return a dict but may not be efficient.
-        self.dbcur.execute("SELECT * FROM url WHERE url = '%s'" % ice_id)
-        matchedrow = self.dbcur.fetchone()
-        if matchedrow:
-            print 'something found'
-            type = dict(matchedrow)['type']
-            print type
-            imdb_id = dict(matchedrow)['imdb_id']
-            print imdb_id
-            if (type == 'movie' or type == 'tvshow') and imdb_id is not None:
-                meta = self._cache_lookup_movie_by_imdb(imdb_id, type)
-                return meta
-            elif type=='episode':
-                season = dict(matchedrow)['season']
-                episode = dict(matchedrow)['name']
-                meta = self._cache_lookup_episode( imdb_id, season, episode)
-                return meta
-            else:
-                return None
-        else:
-            return None
+        self.dbcon.commit()  
     
     def refresh_movie_meta(self, imdb_id):
         #print 'Show Overview from TVDB is ' + show.poster_url

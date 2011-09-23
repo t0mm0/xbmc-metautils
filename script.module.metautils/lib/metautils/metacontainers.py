@@ -10,9 +10,12 @@ currently very specific to icefilms.info
 
 import re,os,sys,urllib,urllib2
 import shutil
+import xbmcaddon
 
 #append lib directory
-sys.path.append((os.path.split(os.getcwd()))[0])
+addon = xbmcaddon.Addon(id='script.module.metautils')
+path = addon.getAddonInfo('path')
+sys.path.append((os.path.split(path))[0])
 
 try: import xbmc
 except:
@@ -58,7 +61,7 @@ def create_metadata_container():
     print ' '
     print ' '
 
-    #scrape A-Z of all movies on icefilms.
+    #scrape A-Z of all tv shows
     default.TVA2ZDirectories('')
 
     print '### FINISHED Adding movies to database ###'
@@ -69,7 +72,7 @@ def create_metadata_container():
     print ' '
     print ' '
     
-    #scrape A-Z of all tv shows on icefilms.
+    #scrape A-Z of all movies
     default.MOVIEA2ZDirectories('')
 
     print '### FINISHED Adding TV Shows to database ###'
