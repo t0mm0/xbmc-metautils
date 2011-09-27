@@ -173,22 +173,25 @@ class MetaData:
 #--------------------------------Start of Movie cache handling code ----------------#
 
         
-    def get_meta(self, imdb_id, type, name, refresh=False):
-
-        # add the tt if not found. integer aware.
-        imdb_id=str(imdb_id)
-        if not imdb_id.startswith('tt'):
-                imdb_id = "tt%s" % imdb_id
+    def get_meta(self, imdb_id, type, name, year='', refresh=False):
 
         if refresh:
             meta=None
         else:
 #            self.check_video_for_url( ice_id, imdb_id, type )
-            meta = self._cache_lookup_movie_by_imdb(imdb_id, type)
+            if imdb_id:
+                # add the tt if not found. integer aware.
+                imdb_id=str(imdb_id)
+                if not imdb_id.startswith('tt'):
+                    imdb_id = "tt%s" % imdb_id
+
+                meta = self._cache_lookup_movie_by_imdb(imdb_id, type)
+            else:
+                meta = self._cache_lookup_movie_by_name(type, name, year)
 
         if not meta:
             #print "adding to cache and getting metadata from web"
-            meta = self._get_tmdb_meta_data(imdb_id,type, name)
+            meta = self._get_tmdb_meta_data(imdb_id,type, name, year)
             meta['watched'] = self.get_watched( imdb_id, 'movie')
             self._cache_save_movie_meta(meta, type)
 
@@ -315,7 +318,22 @@ class MetaData:
                 return dict(matchedrow)
         else:
             return None
-        
+    
+    def _cache_lookup_movie_by_name(self, type, name, year=''):
+        if type == 'movie':
+            table='movie_meta'
+        elif type == 'tvshow':
+            table='tvshow_meta'
+        sql_select = "SELECT * FROM " + table + " WHERE name = '%s'" % name
+        if year:
+            sql_select = sql_select + " AND strftime('%s',premiered) = '%s'" % ('%Y', year)
+        self.dbcur.execute(sql_select)            
+        matchedrow = self.dbcur.fetchone()
+        if matchedrow:
+            return dict(matchedrow)
+        else:
+            return None
+            
     def check_video_for_url(self, ice_id, imdb_id, type, tvdb_id='', season='', episode=''):
         self.dbcur.execute("SELECT * FROM url WHERE url = '%s'" % ice_id )
         matchedrow = self.dbcur.fetchone()
@@ -365,26 +383,38 @@ class MetaData:
     # no movie meta info was found from tmdb because we should cache
     # these "None found" entries otherwise we hit tmdb alot.
     
-    def _get_tmdb_meta_data(self, imdb_id, type, name):
+    def _get_tmdb_meta_data(self, imdb_id, type, name, year=''):
         #get metadata text using themoviedb api
         tmdb = TMDB()
-        md = tmdb.imdbLookup(imdb_id,type,name)
+        
+        md = tmdb.imdbLookup(type,name,imdb_id,year)       
+        
         if md is None:
             # create an empty dict so below will at least populate empty data for the db insert.
             md = {}
+        else:
+            if not imdb_id:
+                imdb_id = md['imdb_id']
 
         # copy tmdb to our own for conformity and eliminate KeyError.
         # we set a default value for those keys not returned by tmdb.
+        
+        #Ensure year has a set value
+        if year:
+            year = year + '-01-01'
+        else:
+            year = ''
+            
         meta = {}
         meta['watched'] = 6
-        meta['imdb_id'] = imdb_id
+        meta['imdb_id'] = md.get('imdb_id', imdb_id)
         meta['tmdb_id'] = md.get('id', '')
         meta['name'] = name #md.get('name', '')
         meta['rating'] = md.get('rating', 0)
         meta['duration'] = md.get('runtime', 0)
         meta['plot'] = md.get('overview', '')
         meta['mpaa'] = md.get('certification', '')
-        meta['premiered'] = md.get('released', '')
+        meta['premiered'] = md.get('released', year)
         meta['trailer_url'] = md.get('trailer', '')
         #print meta['plot']
         meta['genres'] = ''

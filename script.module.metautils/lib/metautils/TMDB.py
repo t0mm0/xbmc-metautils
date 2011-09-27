@@ -6,10 +6,8 @@
 
 import simplejson
 import urllib, urllib2, re, socket
-#from pprint import pprint
-
 from thetvdbapi import TheTVDB            
-#from string import maketrans,translate
+
 
 class TMDB(object):
     def __init__(self, api_key='b91e899ce561dd19695340c3b26e0a02', view='json', lang='en'):
@@ -18,6 +16,9 @@ class TMDB(object):
         self.lang = lang
         self.api_key = api_key
         self.url_prefix = 'http://api.themoviedb.org/2.1'
+        self.imdb_api = 'http://www.imdbapi.com/?i=%s'
+        self.imdb_name_api = 'http://www.imdbapi.com/?t=%s'
+        self.imdb_nameyear_api = 'http://www.imdbapi.com/?t=%s&y=%s'
 
     def cleanUnicode(self, string):
         '''
@@ -81,8 +82,15 @@ class TMDB(object):
             except:
                 return True
 
-    def _search_imdb(self, meta, imdb_id):
-        url = "http://www.imdbapi.com/?i=" + imdb_id
+    def _search_imdb(self, meta, imdb_id, name, year=''):
+        
+        if imdb_id:
+            url = self.imdb_api % imdb_id
+        else:
+            if year:
+                url = self.imdb_nameyear_api % (name, year)
+            else:
+                url = self.imdb_name_api % name
 
         try:
             link = self._getURL(url)
@@ -133,6 +141,7 @@ class TMDB(object):
                         dur = dur + int(scrape[0])
                 meta['runtime']=dur
         
+        meta['imdb_id'] = self._get_it(link, 'ID')
         return meta
 
     # video_id is either tmdb or imdb id
@@ -141,6 +150,12 @@ class TMDB(object):
 
     def getInfo(self, tmdb_id):
         return self._do_request('Movie.getInfo', tmdb_id)
+        
+    def searchMovie(self, name, year=''):
+        if year:
+            name = name + '+' + year
+        return self._do_request('Movie.search',name)
+        
 
     def getSeasonPosters(self, tvdb_id, season):
         tvdb = TheTVDB()
@@ -148,12 +163,22 @@ class TMDB(object):
         
         return images
 
-    def imdbLookup(self, imdb_id, type, name):
+    def imdbLookup(self, type, name, imdb_id='', year=''):
         # Movie.imdbLookup doesn't return all the info that Movie.getInfo does like the cast.
         # So do a small lookup with getVersion just to get the tmdb id from the imdb id.
         # Then lookup by the tmdb id to get all the meta.
 
         meta = {}
+        tmdb_id = ''
+        
+        #If we don't have an IMDB ID let's try searching TMDB first by movie name
+        if type=='movie':
+            if not imdb_id:
+                meta = self.searchMovie(name,year)              
+                if meta:
+                    tmdb_id = meta['id']
+                    imdb_id = meta['imdb_id']        
+               
         if type=='tvshow':
             print 'TV Show lookup'
             tvdb = TheTVDB()
@@ -219,20 +244,19 @@ class TMDB(object):
 
                     if meta['overview'] == 'None' or meta['overview'] == '' or meta['overview'] == 'TBD' or meta['overview'] == 'No overview found.' or meta['rating'] == 0 or meta['runtime'] == 0 or meta['actors'] == '' or meta['imdb_poster'] == '':
                         print ' Some info missing in TVdb for TVshow *** '+ name + ' ***. Will search imdb for more'
-                        meta = self._search_imdb( meta, imdb_id)
+                        meta = self._search_imdb( meta, imdb_id, name)
                     else:
                         meta['overview'] = 'Starring : \n' + meta['actors'] + '\n\nPlot : \n' + meta['overview']
                     return meta
                 else:
-                    meta = self._search_imdb( meta, imdb_id)
+                    meta = self._search_imdb( meta, imdb_id, name)
                     return meta
-
-        try:
-            tmdb_id = self.getVersion(imdb_id)['id']
-        except:
-            print ' Movie *** '+ imdb_id + ' *** not in tmdb. Will search imdb '
-            meta = self._search_imdb( meta, imdb_id)
-            return meta
+         
+        #If we don't have a tmdb_id yet
+        if not tmdb_id and imdb_id:
+            meta = self.getVersion(imdb_id)
+            if meta:
+                tmdb_id = meta['id']
 
         if tmdb_id:
             meta = self._do_request('Movie.getInfo', tmdb_id)
@@ -263,13 +287,13 @@ class TMDB(object):
             #print ' Actors ' + str(meta['actors'])
             if meta['overview'] == 'None' or meta['overview'] == '' or meta['overview'] == 'TBD' or meta['overview'] == 'No overview found.' or meta['rating'] == 0 or meta['runtime'] == 0 or str(meta['genres']) == '[]' or str(meta['posters']) == '[]' or meta['actors'] == '':
                 print ' Some info missing in TMDb for Movie *** '+ imdb_id + ' ***. Will search imdb for more'
-                meta = self._search_imdb( meta, imdb_id)
+                meta = self._search_imdb(meta, imdb_id, name)
             else:
                 meta['overview'] = 'Starring : \n' + meta['actors'] + '\n\nPlot : \n' + meta['overview']
             return meta
         else:
             meta = {}
-            meta = self._search_imdb( meta, imdb_id)
+            meta = self._search_imdb( meta, imdb_id, name, year)
             return meta
 
     def check(self, value, ret=None):
