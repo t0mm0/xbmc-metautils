@@ -21,24 +21,24 @@ They can both be found in the same folder.
 '''
 
 import os
-from pprint import pprint
 import re
 import sys
 import urllib
 import urllib2
 import base64
 import xbmcaddon
-
-#append lib directory
-addon = xbmcaddon.Addon(id='script.module.metautils')
-path = addon.getAddonInfo('path')
-
-sys.path.append((os.path.split(path))[0])
-            
 from TMDB import TMDB
+
 #necessary to make it work on python 2.4 and 2.7
-try: from sqlite3 import dbapi2 as sqlite
-except: from pysqlite2 import dbapi2 as sqlite
+try: 
+    from sqlite3 import dbapi2 as sqlite
+except: 
+    from pysqlite2 import dbapi2 as sqlite
+
+addon = xbmcaddon.Addon(id='script.module.metahandler')
+path = addon.getAddonInfo('path')
+sys.path.append((os.path.split(path))[0])
+
 
 def make_dir(mypath, dirname):
     #...creates sub-directories if they are not found.
@@ -57,23 +57,10 @@ def cleanUnicode(string):
         #fixed_string = string.replace("'","").replace(unicode(u'\u201c'), '"').replace(unicode(u'\u201d'), '"').replace(unicode(u'\u2019'),'').replace(unicode(u'\u2026'),'...').replace(unicode(u'\u2018'),'').replace(unicode(u'\u2013'),'-')
         
         #solve those unicode problems
-        fixed_string = unicodedata.normalize('NFKD', string).encode('ascii','ignore')
-        #print 'THE STRING:',fixed_string
+        fixed_string = unicodedata.normalize('NFKD', string).encode('ASCII','ignore')
         return fixed_string
     except:
         return string
-
-def make_dirs(path):
-        # make the necessary directories, without having to initialise the class (and connect to db etc)
-        mainpath = make_dir(path, 'meta_caches')
-
-        tvpath = make_dir(mainpath, 'tvshow')
-        tvcovers = make_dir(tvpath, 'covers')
-        tvbackdrops = make_dir(tvpath, 'backdrops')
-
-        mvpath = make_dir(mainpath, 'movie')
-        mvcovers = make_dir(mvpath, 'covers')
-        mvbackdrops = make_dir(mvpath, 'backdrops')
 
 class MetaData:
     def __init__(self, path, preparezip=False):
@@ -127,11 +114,9 @@ class MetaData:
 
                self._dl_code(meta['cover_url'],cover_path)
                
-
                #backdrop_name=self._picname(meta['backdrop_url'])
                #backdrop_path = os.path.join(self.mvbackdrops, backdrop_name)
-
-               
+             
                #self._dl_code(meta['backdrop_url'],backdrop_path)
                
           if mediatype=='tvshow':
@@ -178,19 +163,17 @@ class MetaData:
         if refresh:
             meta=None
         else:
-#            self.check_video_for_url( ice_id, imdb_id, type )
             if imdb_id:
                 # add the tt if not found. integer aware.
                 imdb_id=str(imdb_id)
                 if not imdb_id.startswith('tt'):
                     imdb_id = "tt%s" % imdb_id
 
-                meta = self._cache_lookup_movie_by_imdb(imdb_id, type)
+                meta = self._cache_lookup_by_imdb(imdb_id, type)
             else:
-                meta = self._cache_lookup_movie_by_name(type, name, year)
+                meta = self._cache_lookup_by_name(type, name, year)
 
         if not meta:
-            #print "adding to cache and getting metadata from web"
             meta = self._get_tmdb_meta_data(imdb_id,type, name, year)
             meta['watched'] = self.get_watched( imdb_id, 'movie')
             self._cache_save_movie_meta(meta, type)
@@ -226,7 +209,7 @@ class MetaData:
 
         #Clean some unicode stuff
         try:
-            meta['plot']=cleanUnicode(str(meta['plot']))
+            meta['plot']=cleanUnicode(meta['plot'])
         except:
             print 'could not clean plot'
 
@@ -244,7 +227,7 @@ class MetaData:
                            "trailer_url TEXT, backdrop_url TEXT,"
                            "imgs_prepacked TEXT," # 'true' or 'false'. added to determine whether to load imgs from path not url (ie. if they are included in pre-packaged metadata container).
                            "watched INTEGER,"
-                           "UNIQUE(imdb_id)"
+                           "UNIQUE(imdb_id, tmdb_id, name)"
                            ");"
         )
         self.dbcur.execute('CREATE INDEX IF NOT EXISTS nameindex on movie_meta (name);')
@@ -258,7 +241,7 @@ class MetaData:
                            "trailer_url TEXT, backdrop_url TEXT,"
                            "imgs_prepacked TEXT," # 'true' or 'false'. added to determine whether to load imgs from path not url (ie. if they are included in pre-packaged metadata container).
                            "watched INTEGER,"
-                           "UNIQUE(imdb_id)"
+                           "UNIQUE(imdb_id, tmdb_id, name)"
                            ");"
         )
         self.dbcur.execute('CREATE INDEX IF NOT EXISTS nameindex on tvshow_meta (name);')
@@ -290,23 +273,10 @@ class MetaData:
                            "UNIQUE(imdb_id, season)"
                            ");"
         )
-        
-        # split text across lines to make it easier to understand
-        self.dbcur.execute("CREATE TABLE  IF NOT EXISTS url"
-                            "("
-                            "url TEXT,"
-                            "type TEXT,"
-                            "imdb_id TEXT,"
-                            "tvdb_id TEXT,"
-                            "season TEXT,"
-                            "name TEXT,"
-                            "UNIQUE(url)"
-                            ");"
-        )
-        
+               
         #self.dbcur.execute('CREATE INDEX IF NOT EXISTS nameindex on tvshow_meta (name);')
 
-    def _cache_lookup_movie_by_imdb(self, imdb_id, type):
+    def _cache_lookup_by_imdb(self, imdb_id, type):
         if type == 'movie':
             table='movie_meta'
         elif type == 'tvshow':
@@ -319,12 +289,13 @@ class MetaData:
         else:
             return None
     
-    def _cache_lookup_movie_by_name(self, type, name, year=''):
+    def _cache_lookup_by_name(self, type, name, year=''):
         if type == 'movie':
             table='movie_meta'
         elif type == 'tvshow':
             table='tvshow_meta'
-        sql_select = "SELECT * FROM " + table + " WHERE name = '%s'" % name
+        name = name.replace("'","''")
+        sql_select = "SELECT * FROM " + table + " WHERE name = '%s'" % name       
         if year:
             sql_select = sql_select + " AND strftime('%s',premiered) = '%s'" % ('%Y', year)
         self.dbcur.execute(sql_select)            
@@ -333,43 +304,26 @@ class MetaData:
             return dict(matchedrow)
         else:
             return None
-            
-    def check_video_for_url(self, ice_id, imdb_id, type, tvdb_id='', season='', episode=''):
-        self.dbcur.execute("SELECT * FROM url WHERE url = '%s'" % ice_id )
-        matchedrow = self.dbcur.fetchone()
-        
-        if matchedrow:
-            if type=='episode':
-                if matchedrow['imdb_id'] != imdb_id or matchedrow['tvdb_id'] != tvdb_id or matchedrow['season'] != season or matchedrow['name'] != episode:
-                    print 'There might be a problem with this episode. We have to update url with the correct data'
-                    self.dbcur.execute('UPDATE url SET imdb_id = "%s", type = "%s", '
-                                       'tvdb_id = "%s", season = "%s", name = "%s" WHERE url = "%s" '
-                                       '' % ( imdb_id, type, tvdb_id, season, episode, ice_id ) )
-            else:
-                if matchedrow['imdb_id'] != imdb_id:
-                    print 'There might be a problem here. We have to update url with the correct imdb_id'
-                    self.dbcur.execute("UPDATE url SET imdb_id = '%s', type = '%s' WHERE url = '%s' " % ( imdb_id, type, ice_id ) )
-                
-        else:
-            if type != 'episode':
-                tvdb_id=''
-                season=''
-                episode=''
-            self.dbcur.execute('INSERT INTO url VALUES '
-                           '("%s", "%s", "%s", "%s", "%s", "%s" )' % ( ice_id, type, imdb_id, tvdb_id, season, episode ))
-            self.dbcon.commit()
-            
+                       
     def _cache_save_movie_meta(self, meta, type):
         if type == 'movie':
             table='movie_meta'
         elif type == 'tvshow':
             table='tvshow_meta'
-        self.dbcur.execute("SELECT * FROM " + table + " WHERE imdb_id = '%s'" % meta['imdb_id']) #select database row where imdb_id matches
+        
+        #Select on either IMDB ID or name + premiered
+        if meta['imdb_id']:
+            sql_select = "SELECT * FROM " + table + " WHERE imdb_id = '%s'" % meta['imdb_id']
+        else:           
+            sql_select = "SELECT * FROM " + table + " WHERE name = '%s' AND premiered = '%s'" % (meta['name'], meta['premiered'])
+            
+        print 'SQL SELECT', sql_select
+        self.dbcur.execute(sql_select) #select database row
         matchedrow = self.dbcur.fetchone()
+        print 'MATCHED ROW', matchedrow        
         if matchedrow:
                 self.dbcur.execute("DELETE FROM " + table + " WHERE imdb_id = '%s'" % meta['imdb_id']) #delete database row where imdb_id matches
         # use named-parameter binding for lazyness
-        print meta
         self.dbcur.execute("INSERT INTO " + table + " VALUES "
                            "(:imdb_id, :tmdb_id, :name, :rating, :duration, :plot, :mpaa, :premiered, :genres, :studios, :thumb_url, :cover_url, :trailer_url, :backdrop_url, :imgs_prepacked, :watched)",
                            meta
@@ -416,7 +370,6 @@ class MetaData:
         meta['mpaa'] = md.get('certification', '')
         meta['premiered'] = md.get('released', year)
         meta['trailer_url'] = md.get('trailer', '')
-        #print meta['plot']
         meta['genres'] = ''
         if md.has_key('imdb_genres'):
             meta['genres'] = md.get('imdb_genres', '')
@@ -428,7 +381,6 @@ class MetaData:
                 meta['genres'] = temp.get('name','')
             else:
                 meta['genres'] = meta['genres'] + ' / ' + temp.get('name','')
-        print "My genres are : **************  " + meta['genres']
         
         if md.has_key('tvdb_studios'):
             meta['studios'] = md.get('tvdb_studios', '')
@@ -487,6 +439,7 @@ class MetaData:
         if not imdb_id.startswith('tt'):
                 imdb_id = "tt%s" % imdb_id
         print "season is '" + season + "'"
+        
         #clean episode to get episode number
         ep_num = ''
         season_num = ''
@@ -523,7 +476,6 @@ class MetaData:
         if refresh:
             meta=None
         else:
-#            self.check_video_for_url( ice_id, imdb_id, 'episode', tvdb_id=tvdb_id, season=season, episode=episode  )
             meta = self._cache_lookup_episode(imdb_id, season, episode)#ep_num)
         
         if meta is None:
@@ -776,7 +728,7 @@ class MetaData:
     def findCover(self, season, images):
         cover_url = ''
         
-        match=re.compile('Season (.+?) ').findall(season)
+        match=re.compile('[Ss]+eason (.+?)').findall(season)
         if len(match) > 0:
             season_num = match[0]
         else:
@@ -825,7 +777,6 @@ class MetaData:
                     
                     self._cache_save_season_meta(meta)
                 
-                print meta['season'] + ' ' + meta['cover_url']        
                 coversList.append(meta)
             
         return coversList
@@ -849,7 +800,6 @@ class MetaData:
             self.dbcur.execute("DELETE FROM season_meta WHERE imdb_id = '%s' AND season ='%s' " 
                                % ( meta['imdb_id'], meta['season'] ) )
         # use named-parameter binding for lazyness
-        print meta
         self.dbcur.execute("INSERT INTO season_meta VALUES "
                            "(:imdb_id, :tvdb_id, :season, :cover_url, :watched)",
                            meta
@@ -863,7 +813,7 @@ class MetaData:
         if not imdb_id.startswith('tt'):
                 imdb_id = "tt%s" % imdb_id
 
-        meta = None #self._cache_lookup_movie_by_imdb(imdb_id)
+        meta = None #self._cache_lookup_by_imdb(imdb_id)
 
         if meta is None:
             #print "adding to cache and getting metadata from web"
