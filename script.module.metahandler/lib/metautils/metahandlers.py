@@ -440,35 +440,8 @@ class MetaData:
                 imdb_id = "tt%s" % imdb_id
         print "season is '" + season + "'"
         
-        #clean episode to get episode number
-        ep_num = ''
-        season_num = ''
         dateSearch = False
         searchTVDB = True
-        if season.startswith('Season '):
-            season_num=season[7:(len(season)-1)]
-            #print season[7:(len(season)-1)]+'x'
-            if episode.startswith(season[7:(len(season)-1)]+'x'):
-                ep_num=(episode[(len(season)-7):])[:2]
-                if ep_num.startswith('0'):
-                    ep_num=ep_num[1:]
-            else:
-                print '##** imdb=' + str(imdb_id) + ' ' + season + ' Episode ' + episode + ' ** Could not find episode number for pattern 1x01 Episode title **##'
-                #return None
-                ep_num = episode
-                searchTVDB = False
-        elif len(season) == 4 and episode[6] == ".":
-            ep_num=episode[:6]
-            season_num=season
-            dateSearch=True
-        else:
-            print '##** imdb=' + str(imdb_id) + ' ' + season + ' Episode ' + episode + ' ** Could not find episode number for pattern MMM DD. Episode title **##'
-            #return None
-            season_num=season
-            ep_num = episode
-            searchTVDB = False
-        
-        print 'imdb=' + str(imdb_id) + ' ' + season + ' Episode ' + episode + ' Episode Num=' + ep_num
         
         #Find tvdb_id for the TVshow
         tvdb_id = self._get_tvdb_id(imdb_id)
@@ -488,7 +461,7 @@ class MetaData:
                 meta['tvdb_id']=''
                 meta['season']=season
                 meta['season_num'] = 0
-                meta['episode']=ep_num
+                meta['episode']=spisode
                 meta['episode_num'] = 0
                 meta['episode_id'] = ''
                 meta['name']=episode
@@ -510,7 +483,7 @@ class MetaData:
             
             #print "adding to cache and getting metadata from web"
             if searchTVDB:
-                meta = self._get_tvdb_episode_data(tvdb_id, season_num, ep_num, dateSearch)
+                meta = self._get_tvdb_episode_data(tvdb_id, season, episode, dateSearch)
                 if meta is None:
                     meta = {}
                     meta['episode_id'] = ''
@@ -536,7 +509,7 @@ class MetaData:
             meta['imdb_id']=imdb_id
             meta['tvdb_id']=tvdb_id
             meta['season']=season
-            meta['episode']=ep_num
+            meta['episode']=episode
             meta['name']=episode
             meta['cover_url']=meta['poster']
             meta['trailer_url']=''
