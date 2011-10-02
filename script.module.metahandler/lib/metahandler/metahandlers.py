@@ -26,7 +26,7 @@ import sys
 import urllib
 import urllib2
 import base64
-import xbmcaddon
+import xbmc, xbmcaddon
 from TMDB import TMDB
 
 #necessary to make it work on python 2.4 and 2.7
@@ -63,28 +63,27 @@ def cleanUnicode(string):
         return string
 
 class MetaData:
-    def __init__(self, path, preparezip=False):
+    def __init__(self, path='special://profile/addon_data/script.module.metahandler/', preparezip=False):
+
+        self.path = xbmc.translatePath(path)
+        self.cache_path = make_dir(self.path, 'meta_cache')
 
         if preparezip:
             #create container working directory
-            #!!!!!Must be matched to workdir in metacontainers.py Create_Icefilms_Container()
-            workdir = os.path.join(path,'Generated Metacontainer')
-            if not os.path.exists(workdir): os.makedirs(workdir)
-            path = workdir
+            #!!!!!Must be matched to workdir in metacontainers.py create_container()
+            self.work_path = make_dir(self.path, 'work')
             
         #this init auto-constructs necessary folder hierarchies.
 
-        self.mainpath = make_dir(path, 'meta_caches')
-
         # control whether class is being used to prepare pre-packaged .zip
         self.classmode = bool2string(preparezip)
-        self.videocache = os.path.join(self.mainpath, 'video_cache.db')
+        self.videocache = os.path.join(self.cache_path, 'video_cache.db')
 
-        self.tvpath = make_dir(self.mainpath, 'tvshow')
+        self.tvpath = make_dir(self.cache_path, 'tvshow')
         self.tvcovers = make_dir(self.tvpath, 'covers')
         self.tvbackdrops = make_dir(self.tvpath, 'backdrops')
 
-        self.mvpath = make_dir(self.mainpath, 'movie')
+        self.mvpath = make_dir(self.cache_path, 'movie')
         self.mvcovers = make_dir(self.mvpath, 'covers')
         self.mvbackdrops = make_dir(self.mvpath, 'backdrops')
 
