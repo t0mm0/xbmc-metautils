@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="script.module.metautils" name="metautils" version="0.0.1" provider-name="Eldorado (inspired by anarchintosh, westcoast, daledude, t0mm0)">
+<addon id="script.module.metahandler" name="metautils" version="0.0.1" provider-name="Eldorado (inspired by anarchintosh, westcoast, daledude, t0mm0)">
   <requires>
     <import addon="xbmc.python" version="1.0" />
     <import addon="script.module.elementtree"/>
