@@ -10,7 +10,7 @@ currently very specific to icefilms.info
 
 import re,os,sys,urllib,urllib2
 import shutil
-import xbmcaddon
+import xbmc,xbmcaddon
 
 #append lib directory
 addon = xbmcaddon.Addon(id='script.module.metahandler')
@@ -25,7 +25,11 @@ else:
     xbmc_imported=True
 
 class MetaContainer:
-    
+
+    def __init__(self, path='special://profile/addon_data/script.module.metahandler/work'):
+        #!!!! This must be matched to workdir in meteahandler.py MetaData __init__
+        self.path = xbmc.translatePath(path)
+                
     def GetURL(self, url):
         #print 'processing url: '+url
         req = urllib2.Request(url)
@@ -54,7 +58,7 @@ class MetaContainer:
         # Note: please update this with the latest code from MOVIEINDEX and TVINDEX  (from default.py)
     
         #!!!! This must be matched to workdir in meteahandler.py MetaData __init__
-        workdir = os.path.join(os.getcwd(),'Generated Metacontainer')
+        workdir = self.path
         
         print '### BUILDING CONTAINER IN:',workdir
         print ' '
