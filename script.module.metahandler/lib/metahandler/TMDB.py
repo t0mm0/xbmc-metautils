@@ -6,8 +6,9 @@
 
 import simplejson
 import urllib, re, socket
+from t0mm0.common.net import Net
 from thetvdbapi import TheTVDB            
-
+net = Net()
 
 class TMDB(object):
     def __init__(self, api_key='b91e899ce561dd19695340c3b26e0a02', view='json', lang='en'):
@@ -41,31 +42,14 @@ class TMDB(object):
         except:
             return string
      
-    def cleanUnicode(self, string):
-        '''
-        #Unfortunately, this isn't working for unicodes, but these must be all the characters that need replacing
-        #Maybe i'll try to make a method similar to the translate, later
-        #Also these : \xC4"=>"Ae", "\xC6"=>"AE", "\xD6"=>"Oe", "\xDC"=>"Ue", "\xDE"=>"TH", "\xDF"=>"ss", "\xE4"=>"ae", "\xE6"=>"ae", "\xF6"=>"oe", "\xFC"=>"ue", "\xFE"=>"th"
-        intab = "\xA1\xAA\xBA\xBF\xC0\xC1\xC2\xC3\xC5\xC7\xC8\xC9\xCA\xCB\xCC\xCD\xCE\xCF\xD0\xD1\xD2\xD3\xD4\xD5\xD8\xD9\xDA\xDB\xDD\xE0\xE1\xE2\xE3\xE5\xE7\xE8\xE9\xEA\xEB\xEC\xED\xEE\xEF\xF0\xF1\xF2\xF3\xF4\xF5\xF8\xF9\xFA\xFB\xFD\xFF"
-        outtab = "!ao?AAAAACEEEEIIIIDNOOOOOUUUYaaaaaceeeeiiiidnooooouuuyy"
-        trantab = maketrans(intab, outtab)
-        
-        strr = string
-        return translate(strr, trantab)
-        '''
-        try:
-            string = string.replace("'","").replace(unicode(u'\xe3'), 'a').replace(unicode(u'\xe2'), 'a').replace(unicode(u'\xe0'), 'a').replace(unicode(u'\xe1'), 'a').replace(unicode(u'\xe8'), 'e').replace(unicode(u'\xc6'), 'AE').replace(unicode(u'\u2014'), '-').replace(unicode(u'\xe9'), 'e').replace(unicode(u'\u201c'), '"').replace(unicode(u'\u201d'), '"').replace(unicode(u'\u2019'),'').replace(unicode(u'\u2026'),'...').replace(unicode(u'\u2018'),'').replace(unicode(u'\u2013'),'-')
-            return string
-        except:
-            return string  
-       
+            
     def _do_request(self, method, values):
         url = "%s/%s/%s/%s/%s/%s" % (self.url_prefix, method, self.lang, self.view, self.api_key, values)
-        print url
+        print 'Requesting TMDB : %s' % url
         try:
-            meta = simplejson.load(urllib.urlopen(url))[0]
-        except:
-            print "utter failure. probably connection issue"
+            meta = simplejson.loads(net.http_GET(url).content)[0]
+        except Exception, e:
+            print "Error connecting to TMDB: %s " % e
             return None
 
         if meta == 'Nothing found.':
@@ -78,9 +62,7 @@ class TMDB(object):
             return True 
         else:
             try:
-                temp=str(self.cleanUnicode(meta[key]))
-                print 'key is ' + key + ' and temp is ' + str(temp)
-                if temp == '' or temp == '0.0' or temp == '0' or temp == 'None' or temp == '[]' or temp == 'No overview found.' or temp == 'TBD':
+                if key == '' or key == '0.0' or key == '0' or key == 'None' or key == '[]' or key == 'No overview found.' or key == 'TBD':
                     return True
                 else:
                     return False
@@ -100,13 +82,12 @@ class TMDB(object):
                 url = self.imdb_name_api % name
 
         try:
-            meta = simplejson.load(urllib.urlopen(url))
-        # XXX don't remove any of these - all three have been encountered (in the same session)
-        except (urllib.HTTPError, urllib.URLError, socket.error), e:
-            print "Can't access %s: %s" % (url, e)
+            print 'Requesting IMDB : %s' % url
+            meta = simplejson.loads(net.http_GET(url).content)
+        except Exception, e:
+            print "Error connecting to IMDB: %s " % e
             return meta
 
-        #print 'imdb link is ->' + link
         if not meta['Response'] == 'True':
             return {}
         else:
@@ -114,13 +95,12 @@ class TMDB(object):
         
     def _update_imdb_meta(self,meta, imdb_meta):
     
+        print 'Updating TMDB meta with IMDB'        
         if self._upd_key(meta, 'overview'):
-            #meta['overview']=unicode(imdb_meta['Plot'], 'utf-8')
             if imdb_meta.has_key('Plot'):
                 meta['overview']=imdb_meta['Plot']           
 
         if self._upd_key(meta, 'actors'):
-            #meta['overview']='Starring : \n' + unicode(imdb_meta['Actors'], 'utf-8') + '\n\nPlot : \n' + meta['overview']
             meta['overview']='Starring : \n' + imdb_meta['Actors'] + '\n\nPlot : \n' + meta['overview']
         else:
             meta['overview']='Starring : \n' + meta['actors'] + '\n\nPlot : \n' + meta['overview']
@@ -133,12 +113,10 @@ class TMDB(object):
             temp=imdb_meta['Rating']
             if temp != 'N/A' and temp !='' and temp != None:
                 meta['rating']=temp
-        if self._upd_key(meta, 'genres') and self._upd_key(meta, 'imdb_genres'):
+        if self._upd_key(meta, 'genre') and self._upd_key(meta, 'imdb_genres'):
             temp=imdb_meta['Genre']
             if temp != 'N/A':
                 meta['imdb_genres']=temp
-        print 'META', meta
-        print 'IMDB META', imdb_meta
         if self._upd_key(meta, 'runtime'):
             temp=imdb_meta['Runtime']
             if temp != 'N/A':
@@ -153,9 +131,9 @@ class TMDB(object):
                     scrape=re.compile('(.+?) min').findall(temp)
                     if len(scrape) > 0:
                         dur = dur + int(scrape[0])
-                meta['runtime']=dur
+                meta['runtime']=str(dur)
         
-        meta['imdb_id'] = imdb_meta['ID']
+        meta['code'] = imdb_meta['ID']
         return meta
 
     # video_id is either tmdb or imdb id
@@ -167,7 +145,7 @@ class TMDB(object):
         
     def searchMovie(self, name, year=''):
         if year:
-            name = name + '+' + year
+            name = urllib.quote(name) + '+' + year
         return self._do_request('Movie.search',name)
         
 
@@ -230,7 +208,7 @@ class TMDB(object):
                 print 'Show *** ' + name + ' *** found in TVdb. Getting details...'
                 show = tvdb.get_show(tvdb_id)
                 if show is not None:
-                    meta['imdb_id'] = imdb_id
+                    meta['code'] = imdb_id
                     meta['id'] = tvdb_id
                     meta['name'] = name
                     if str(show.rating) == '' or show.rating == None:
@@ -245,7 +223,7 @@ class TMDB(object):
                     if show.genre != '':
                         temp = show.genre.replace("|",",")
                         temp = temp[1:(len(temp)-1)]
-                        meta['imdb_genres'] = temp
+                        meta['genre'] = temp
                     meta['tvdb_studios'] = show.network
                     if show.actors != None:
                         num=1
@@ -279,7 +257,7 @@ class TMDB(object):
                         meta = self._update_imdb_meta(meta, imdb_meta)
                     return meta
          
-        #If we don't have a tmdb_id yet
+        #If we don't have a tmdb_id yet but do have imdb_id lets see if we can find it
         if not tmdb_id and imdb_id:
             meta = self.getVersion(imdb_id)
             if meta:
@@ -291,28 +269,22 @@ class TMDB(object):
             if meta is None: # fall through to IMDB lookup
                 meta = {}
 
-            tmp_cast = []
-            tmp_cast = meta.get('cast', '')
+            cast_list = []
+            cast_list = meta.get('cast', '')
             meta['actors'] = ''
-            for temp in tmp_cast:
-                job=temp.get('job','')
+            for cast in cast_list:
+                job=cast.get('job','')
                 if job == 'Actor':
-                    num=temp.get('order','')
+                    num=cast.get('order','')
                     if num == 0 or meta['actors'] == '':
-                        meta['actors'] = temp.get('name','')
+                        meta['actors'] = cast.get('name','')
                     else:
-                        meta['actors'] = meta['actors'] + ', ' + temp.get('name','')
+                        meta['actors'] = meta['actors'] + ', ' + cast.get('name','')
                         if num == 4: # Read only first 5 actors, there might be a lot of them
                             break
-            meta['actors'] = self.cleanUnicode(meta['actors'])
-            # Read overview only when in English Language, to avoid some unicode errors
-            if meta['language'] != 'en':
-                meta['overview'] = ''
-            else:
-                meta['overview'] = self.cleanUnicode(meta['overview'])
-            #print ' Actors ' + str(meta['actors'])
+            
             if meta['overview'] == 'None' or meta['overview'] == '' or meta['overview'] == 'TBD' or meta['overview'] == 'No overview found.' or meta['rating'] == 0 or meta['runtime'] == 0 or str(meta['genres']) == '[]' or str(meta['posters']) == '[]' or meta['actors'] == '':
-                print ' Some info missing in TMDb for Movie *** '+ imdb_id + ' ***. Will search imdb for more'
+                print 'Some info missing in TMDB for Movie *** %s ***. Will search imdb for more' % imdb_id
                 imdb_meta = self._search_imdb(name, imdb_id)
                 meta = self._update_imdb_meta(meta, imdb_meta)
             else:
@@ -325,7 +297,7 @@ class TMDB(object):
             if imdb_meta:
                 meta = self._update_imdb_meta({}, imdb_meta)
        
-        meta['imdb_id'] = imdb_id
+        meta['code'] = imdb_id
         return meta
 
     def check(self, value, ret=None):
