@@ -27,6 +27,7 @@ import sys
 import base64
 import xbmc, xbmcaddon
 from TMDB import TMDB
+from thetvdbapi import TheTVDB
 
 ''' Use t0mm0's common library for http calls, corrects unicode problems '''
 from t0mm0.common.net import Net
@@ -110,7 +111,27 @@ class MetaData:
         self.dbcur.close()
         self.dbcon.close()
 
+    def _string_compare(self, s1, s2):
+        """ Method that takes two strings and returns True or False, based
+            on if they are equal, regardless of case.
+        """
+        try:
+            return s1.lower() == s2.lower()
+        except AttributeError:
+            print "Please only pass strings into this method."
+            print "You passed a %s and %s" % (s1.__class__, s2.__class__)
 
+   
+    def _clean_string(self, string):
+        """ 
+            Method that takes a string and returns it cleaned of any special characters
+            in order to do proper string comparisons
+        """        
+        try:
+            return ''.join(e for e in string if e.isalnum())
+        except:
+            return string
+    
     def _downloadimages(self,meta,mediatype,name):
         '''
         Download images to save locally
@@ -197,6 +218,7 @@ class MetaData:
         '''
         
         print 'Attempting to retreive meta data for %s: %s %s %s' % (type, name, year, imdb_id)
+        
         if imdb_id:
             # add the tt if not found. integer aware.
             imdb_id=str(imdb_id)
@@ -208,7 +230,14 @@ class MetaData:
             meta = self._cache_lookup_by_name(type, name, year)
 
         if not meta:
-            meta = self._get_tmdb_meta_data(imdb_id,type, name, year)
+            
+            if type=='movie':
+                meta = self._get_tmdb_meta(imdb_id, name, year)
+            elif type=='tvshow':
+                meta = self._get_tvdb_meta(imdb_id, name, year)
+            
+            meta = self._format_meta(meta, imdb_id, name, year)
+            
             meta['overlay'] = self.get_watched( imdb_id, 'movie')
             self._cache_save_video_meta(meta, type)
 
@@ -218,6 +247,10 @@ class MetaData:
 
         if meta:
 
+            #Change cast back into a tuple
+            if meta['cast']:
+                meta['cast'] = eval(meta['cast'])
+            
             #if cache row says there are pre-packed images...
             if meta['imgs_prepacked'] == 'true':
                     encoded_name = base64.b64encode(meta['title'])
@@ -401,7 +434,8 @@ class MetaData:
             print 'Meta data:', meta               
             pass
         
-        meta['imdb_id'] = meta['code']  
+        meta['imdb_id'] = meta['code']
+        meta['cast'] = str(meta['cast'])
         
         print 'Saving cache information: ', meta         
         try:
@@ -428,16 +462,15 @@ class MetaData:
             pass            
     
 
-    def _get_tmdb_meta_data(self, imdb_id, type, name, year=''):
+    def _get_tmdb_meta(self, imdb_id, name, year=''):
         '''
         Requests meta data from TMDB and creates proper dict to send back
         
         Args:
             imdb_id (str): IMDB ID
-            type (str): 'movie' or 'tvshow'
-            name (str): full name of movie/tvshow you are searching
+            name (str): full name of movie you are searching
         Kwargs:
-            year (str): 4 digit year of video, when imdb_id is not available it is recommended
+            year (str): 4 digit year of movie, when imdb_id is not available it is recommended
                         to include the year whenever possible to maximize correct search results.
                         
         Returns:
@@ -445,18 +478,137 @@ class MetaData:
             no movie meta info was found from tmdb because we should cache
             these "None found" entries otherwise we hit tmdb alot.
         '''        
-        tmdb = TMDB()        
-        md = tmdb.imdbLookup(type,name,imdb_id,year)       
         
-        if md is None:
+        tmdb = TMDB()        
+        meta = tmdb.tmdb_lookup(name,imdb_id,year)       
+        
+        if meta is None:
             # create an empty dict so below will at least populate empty data for the db insert.
-            md = {}
+            meta = {}
         else:
             if not imdb_id:
-                imdb_id = md['code']
+                imdb_id = meta['code']
+ 
+        return meta
 
-        # copy tmdb to our own for conformity and eliminate KeyError.
-        # we set a default value for those keys not returned by tmdb.
+    
+    def _get_tvdb_meta(self, imdb_id, name, year=''):
+        '''
+        Requests meta data from TVDB and creates proper dict to send back
+        
+        Args:
+            imdb_id (str): IMDB ID
+            name (str): full name of movie you are searching
+        Kwargs:
+            year (str): 4 digit year of movie, when imdb_id is not available it is recommended
+                        to include the year whenever possible to maximize correct search results.
+                        
+        Returns:
+            DICT. It must also return an empty dict when
+            no movie meta info was found from tvdb because we should cache
+            these "None found" entries otherwise we hit tvdb alot.
+        '''      
+        print 'Starting TVDB Lookup'
+        tvdb = TheTVDB()
+        tvdb_id = ''
+        meta = {}
+        if imdb_id:
+            tvdb_id = tvdb.get_show_by_imdb(imdb_id)
+
+        # if not found by imdb, try by name
+        if tvdb_id == '':
+            show_list=tvdb.get_matching_shows(name)
+            print 'Found TV Show List: ', show_list
+            tvdb_id=''
+            prob_id=''
+            for show in show_list:
+                (junk1, junk2, junk3) = show
+                #if we match imdb_id or full name (with year) then we know for sure it is the right show
+                if junk3==imdb_id or self._string_compare(self._clean_string(junk2),self._clean_string(name)):
+                    tvdb_id=self._clean_string(junk1)
+                    imdb_id=self._clean_string(junk3)
+                    break
+                #if we match just the cleaned name (without year) keep the tvdb_id
+                elif self._string_compare(self._clean_string(junk2),self._clean_string(name)):
+                    prob_id = junk1
+                    imdb_id = self_clean_string(junk3)
+            if tvdb_id == '' and prob_id != '':
+                tvdb_id = self._clean_string(prob_id)
+
+        if tvdb_id:
+            print 'Show *** ' + name + ' *** found in TVdb. Getting details...'
+            show = tvdb.get_show(tvdb_id)
+            if show is not None:
+                meta['code'] = imdb_id
+                meta['id'] = tvdb_id
+                meta['name'] = name
+                if str(show.rating) == '' or show.rating == None:
+                    meta['rating'] = 0
+                else:
+                    meta['rating'] = show.rating
+                meta['runtime'] = 0
+                meta['overview'] = show.overview
+                meta['certification'] = show.content_rating
+                meta['released'] = show.first_aired
+                meta['trailer_url'] = ''
+                if show.genre != '':
+                    temp = show.genre.replace("|",",")
+                    temp = temp[1:(len(temp)-1)]
+                    meta['genre'] = temp
+                meta['tvdb_studios'] = show.network
+                if show.actors != None:
+                    num=1
+                    meta['actors']=''
+                    print show.actors
+                    for actor in show.actors:
+                        if num == 1:
+                            meta['actors'] = actor
+                        else:
+                            meta['actors'] = meta['actors'] + ", " + actor
+                            if num == 5: # Read only first 5 actors, there might be a lot of them
+                                break
+                        num = num + 1
+                #meta['imgs_prepacked'] = self.classmode
+                meta['imdb_poster'] = show.poster_url
+                print 'cover is  *** ' + meta['imdb_poster']
+                
+                print '          rating ***' + str(meta['rating'])+'!!!'
+
+                if meta['overview'] == 'None' or meta['overview'] == '' or meta['overview'] == 'TBD' or meta['overview'] == 'No overview found.' or meta['rating'] == 0 or meta['runtime'] == 0 or meta['actors'] == '' or meta['imdb_poster'] == '':
+                    print ' Some info missing in TVdb for TVshow *** '+ name + ' ***. Will search imdb for more'
+                    tmdb = TMDB()
+                    imdb_meta = tmdb.search_imdb(name, imdb_id)
+                    if imdb_meta:
+                        meta = tmdb.update_imdb_meta(meta, imdb_meta)
+                else:
+                    meta['overview'] = 'Starring : \n' + meta['actors'] + '\n\nPlot : \n' + meta['overview']
+                return meta
+            else:
+                tmdb = TMDB()
+                imdb_meta = tmdb.search_imdb(name, imdb_id)
+                if imdb_meta:
+                    meta = tmdb.update_imdb_meta(meta, imdb_meta)
+                return meta    
+        else:
+            return meta
+
+
+    def _format_meta(self, md, imdb_id, name, year):
+        '''
+        Copy tmdb to our own for conformity and eliminate KeyError. Set default for values not returned
+        
+        Args:
+            imdb_id (str): IMDB ID
+            name (str): full name of movie you are searching
+        Kwargs:
+            year (str): 4 digit year of movie, when imdb_id is not available it is recommended
+                        to include the year whenever possible to maximize correct search results.
+                        
+        Returns:
+            DICT. It must also return an empty dict when
+            no movie meta info was found from tvdb because we should cache
+            these "None found" entries otherwise we hit tvdb alot.
+        '''      
         
         #Ensure year has a set value
         if year:
@@ -466,9 +618,9 @@ class MetaData:
             
         meta = {}
         meta['overlay'] = 6
-        meta['code'] = md.get('imdb_id', imdb_id)
+        meta['code'] = md.get('code', imdb_id)
         meta['tmdb_id'] = md.get('id', '')
-        meta['title'] = name #md.get('name', '')
+        meta['title'] = md.get('name', name)
         meta['writer'] = ''
         meta['director'] = ''
         meta['tagline'] = md.get('tagline', '')
@@ -556,8 +708,8 @@ class MetaData:
                     break
 
         return meta
-
-
+        
+            
     def get_episode_meta(self, imdb_id, season, episode):
         '''
         Requests meta data from TVDB for TV episodes, searches local cache db first.
@@ -598,7 +750,7 @@ class MetaData:
                 meta['tvdb_id']=''
                 meta['season']=season
                 meta['season_num'] = 0
-                meta['episode']=spisode
+                meta['episode']=episode
                 meta['episode_num'] = 0
                 meta['episode_id'] = ''
                 meta['title']= ''
@@ -1052,7 +1204,7 @@ class MetaData:
 
         if meta is None:
             #print "adding to cache and getting metadata from web"
-            meta = self._get_tmdb_meta_data(imdb_id)
+            meta = self._get_tmdb_meta(imdb_id)
             self._cache_save_video_meta(meta)
 
             #if creating a metadata container, download the images.
