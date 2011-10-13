@@ -64,6 +64,7 @@ class TMDB(object):
         try:
             print 'Requesting IMDB : %s' % url
             meta = simplejson.loads(net.http_GET(url).content)
+            print 'IMDB Meta: ', meta
         except Exception, e:
             print "Error connecting to IMDB: %s " % e
             return {}
@@ -74,13 +75,13 @@ class TMDB(object):
             return meta
         
 
-    def update_imdb_meta(self,meta, imdb_meta):
+    def update_imdb_meta(self, meta, imdb_meta):
     
-        print 'Updating TMDB meta with IMDB'        
+        print 'Updating current meta with IMDB'
         if self._upd_key(meta, 'overview'):
             if imdb_meta.has_key('Plot'):
                 meta['overview']=imdb_meta['Plot']           
-
+        
         if self._upd_key(meta, 'posters') and self._upd_key(meta, 'imdb_poster'):
             temp=imdb_meta['Poster']
             if temp != 'N/A':
@@ -128,13 +129,6 @@ class TMDB(object):
         return self._do_request('Movie.search',name)
         
 
-    def getSeasonPosters(self, tvdb_id, season):
-        tvdb = TheTVDB()
-        images = tvdb.get_show_image_choices(tvdb_id)
-        
-        return images
-
-
     def tmdb_lookup(self, name, imdb_id='', year=''):
         tmdb_id = ''
         meta = {}
@@ -181,16 +175,6 @@ class TMDB(object):
         return meta
 
 
-    def check(self, value, ret=None):
-        if value is None or value == '':
-            if ret == None:
-                return ''
-            else:
-                return ret
-        else:
-            return value
-
-
     def get_date(self, year, month_day):
         month_name = month_day[:3]
         day=month_day[4:]
@@ -219,58 +203,5 @@ class TMDB(object):
             month='11'
         elif month_name=='Dec':
             month='12'
-        
-        print year + '-' + month + '-' + day
-        
+               
         return year + '-' + month + '-' + day
-        
-
-    def tvdbLookup(self, tvdb_id, season_num, episode_num, dateSearch):
-        #TvDB Lookup for episodes
-        
-        meta = {}
-        tvdb = TheTVDB()
-        if dateSearch:
-            aired=self.get_date(season_num, episode_num)
-            episode = tvdb.get_episode_by_airdate(tvdb_id, aired)
-            
-            #We do this because the airdate method returns just a part of the overview unfortunately
-            if episode is not None:
-                ep_id = episode.id
-                if ep_id is not None:
-                    episode = tvdb.get_episode(ep_id)
-        else:
-            episode = tvdb.get_episode_by_season_ep(tvdb_id, season_num, episode_num)
-            
-        if episode is None:
-            return None
-        
-        meta['episode_id'] = episode.id
-        meta['tvdb_name'] = self.check(episode.name)
-        meta['plot'] = self.check(episode.overview)
-        '''if episode.season_number is not None and episode.episode_number is not None:
-            meta['plot'] = "Episode: " + episode.season_number + "x" + episode.episode_number + "\n" + meta['plot']
-        if episode.first_aired is not None:
-            meta['plot'] = "Aired  : " + episode.first_aired + "\n" + meta['plot']
-        if episode.name is not None:
-            meta['plot'] = episode.name + "\n" + meta['plot']'''
-        meta['rating'] = self.check(episode.rating,0)
-        meta['aired'] = self.check(episode.first_aired)
-        meta['poster'] = self.check(episode.image)
-        meta['season_num'] = self.check(episode.season_number,0)
-        meta['episode_num'] = self.check(episode.episode_number,0)
-        
-        '''
-        show_and_episodes = tvdb.get_show_and_episodes(tvdb_id)
-        if show_and_episodes == None:
-            return meta
-        
-        (show, ep_list) = show_and_episodes
-        for episode in ep_list:
-            print '      S'+ episode.season_number + '.E' + episode.episode_number
-            if episode.season_number == season_num and episode.episode_number == episode_num:
-                meta['']=''
-                break
-        '''
-        
-        return meta
