@@ -755,7 +755,10 @@ class MetaData:
         meta['duration'] = str(md.get('runtime', 0))
         meta['plot'] = md.get('overview', '')
         meta['mpaa'] = md.get('certification', '')
+        
+        #Last fail safe to ensure premiered has a value
         meta['premiered'] = md.get('released', year)
+        
         meta['trailer_url'] = md.get('trailer', '')
         meta['genre'] = md.get('genre', '')
         
