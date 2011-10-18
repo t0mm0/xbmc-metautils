@@ -8,7 +8,7 @@ currently very specific to icefilms.info
 # from cleaners import *
 # import clean_dirs
 
-import re,os,sys,urllib,urllib2
+import os,sys
 import shutil
 import xbmc,xbmcaddon
 
@@ -30,14 +30,6 @@ class MetaContainer:
         #!!!! This must be matched to workdir in meteahandler.py MetaData __init__
         self.path = xbmc.translatePath(path)
                 
-    def GetURL(self, url):
-        #print 'processing url: '+url
-        req = urllib2.Request(url)
-        req.add_header('User-Agent', 'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-GB; rv:1.9.0.3) Gecko/2008092417 Firefox/3.0.3')       
-        response = urllib2.urlopen(req)
-        link=response.read()
-        response.close()
-        return link
     
     def _updir(self, thepath, x):
             # move up x directories on thepath
@@ -46,6 +38,7 @@ class MetaContainer:
                 thepath = (os.path.split(thepath))[0]
             return thepath
      
+
     def create_metadata_container(self):
     
         from cleaners import *
