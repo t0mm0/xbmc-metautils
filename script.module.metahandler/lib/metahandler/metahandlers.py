@@ -1,5 +1,5 @@
 '''
-    These classes cache non-existant metadata from TheMovieDB and TVDB.
+    These classes cache metadata from TheMovieDB and TVDB.
     It uses sqlite databases.
        
     It uses themoviedb JSON api class and TVDB XML api class.
@@ -24,7 +24,6 @@
 import os
 import re
 import sys
-import base64
 import xbmc, xbmcaddon
 from TMDB import TMDB
 from thetvdbapi import TheTVDB
@@ -78,10 +77,15 @@ class MetaData:
         self.path = xbmc.translatePath(path)
         self.cache_path = make_dir(self.path, 'meta_cache')
 
+        
         if preparezip:
             #create container working directory
             #!!!!!Must be matched to workdir in metacontainers.py create_container()
             self.work_path = make_dir(self.path, 'work')
+            
+        #set movie/tvshow constants
+        self.type_movie = 'movie'
+        self.type_tvshow = 'tvshow'
             
         #this init auto-constructs necessary folder hierarchies.
 
@@ -89,11 +93,11 @@ class MetaData:
         self.classmode = bool2string(preparezip)
         self.videocache = os.path.join(self.cache_path, 'video_cache.db')
 
-        self.tvpath = make_dir(self.cache_path, 'tvshow')
+        self.tvpath = make_dir(self.cache_path, self.type_tvshow)
         self.tvcovers = make_dir(self.tvpath, 'covers')
         self.tvbackdrops = make_dir(self.tvpath, 'backdrops')
 
-        self.mvpath = make_dir(self.cache_path, 'movie')
+        self.mvpath = make_dir(self.cache_path, self.type_movie)
         self.mvcovers = make_dir(self.mvpath, 'covers')
         self.mvbackdrops = make_dir(self.mvpath, 'backdrops')
 
@@ -188,6 +192,7 @@ class MetaData:
         meta['overlay'] = 6
         return meta
     
+    
     def _string_compare(self, s1, s2):
         """ Method that takes two strings and returns True or False, based
             on if they are equal, regardless of case.
@@ -208,6 +213,38 @@ class MetaData:
             return ''.join(e for e in string if e.isalnum())
         except:
             return string
+ 
+
+    def _get_date(self, year, month_day):
+        month_name = month_day[:3]
+        day=month_day[4:]
+        
+        if month_name=='Jan':
+            month='01'
+        elif month_name=='Feb':
+            month='02'
+        elif month_name=='Mar':
+            month='03'
+        elif month_name=='Apr':
+            month='04'
+        elif month_name=='May':
+            month='05'
+        elif month_name=='Jun':
+            month='06'
+        elif month_name=='Jul':
+            month='07'
+        elif month_name=='Aug':
+            month='08'
+        elif month_name=='Sep':
+            month='09'
+        elif month_name=='Oct':
+            month='10'
+        elif month_name=='Nov':
+            month='11'
+        elif month_name=='Dec':
+            month='12'
+               
+        return year + '-' + month + '-' + day   
     
     
     def _downloadimages(self,meta,mediatype,name):
@@ -219,27 +256,28 @@ class MetaData:
             mediatype (str): 'movies' or 'tvshow'
             name (str): filename to download
         '''                 
-        if mediatype=='movies':
-             cover_folder=os.path.join(self.mvcovers,name)
+        
 
-             if not os.path.exists(cover_folder):
-                 os.makedirs(cover_folder)
+        if mediatype==self.type_movie:
+             cover_folder=os.path.join(self.mvcovers, name)
+             backdrop_folder=os.path.join(self.mvbackdrops, name)
+        elif mediatype==self.type_tvshow:
+             cover_folder = os.path.join(self.tvcovers, name)
+             backdrop_folder=os.path.join(self.tvbackdrops, name)
 
-             cover_name=self._picname(meta['cover_url'])
-             cover_path = os.path.join(cover_folder, cover_name)
+    
+        if not os.path.exists(cover_folder):
+            os.makedirs(cover_folder)
 
-             self._dl_code(meta['cover_url'],cover_path)
-             
-             #backdrop_name=self._picname(meta['backdrop_url'])
-             #backdrop_path = os.path.join(self.mvbackdrops, backdrop_name)
-           
-             #self._dl_code(meta['backdrop_url'],backdrop_path)
-             
-        if mediatype=='tvshow':
-             outpath = os.path.join(self.tvimgpath, 'hi')
-        if mediatype=='episode':
-             pass
-   
+        cover_name=self._picname(meta['cover_url'])
+        cover_path = os.path.join(cover_folder, cover_name)
+
+        self._dl_code(meta['cover_url'],cover_path)
+        
+        backdrop_name=self._picname(meta['backdrop_url'])
+        backdrop_path = os.path.join(backdrop_folder, backdrop_name)
+      
+        self._dl_code(meta['backdrop_url'],backdrop_path)              
 
     def _picname(self,url):
         '''
@@ -295,6 +333,7 @@ class MetaData:
             DICT of meta data or None if cannot be found.
         '''
         
+        print '---------------------------------------------------------------------------------------'
         print 'Attempting to retreive meta data for %s: %s %s %s' % (type, name, year, imdb_id)
         
         if imdb_id:
@@ -309,18 +348,18 @@ class MetaData:
 
         if not meta:
             
-            if type=='movie':
+            if type==self.type_movie:
                 meta = self._get_tmdb_meta(imdb_id, name, year)
                 meta = self._format_tmdb_meta(meta, imdb_id, name, year)                
-            elif type=='tvshow':
+            elif type==self.type_tvshow:
                 meta = self._get_tvdb_meta(imdb_id, name, year)
                        
-            meta['overlay'] = self.get_watched( imdb_id, 'movie')
-            self._cache_save_video_meta(meta, type)
+            meta['overlay'] = self.get_watched( imdb_id, self.type_movie)
+            self._cache_save_video_meta(meta, name, type)
 
             #if creating a metadata container, download the images.
             if self.classmode == 'true':
-                self._downloadimages(meta,'movies',imdb_id)
+                self._downloadimages(meta,type,imdb_id)
 
         if meta:
 
@@ -328,29 +367,36 @@ class MetaData:
             if meta['cast']:
                 meta['cast'] = eval(meta['cast'])
             
-            #if cache row says there are pre-packed images...
+            #if cache row says there are pre-packed images then either use them or create them
             if meta['imgs_prepacked'] == 'true':
-                    encoded_name = base64.b64encode(meta['title'])
 
                     #define the image paths
-                    cover_path = os.path.join(self.mvcovers, imdb_id, self._picname(meta['cover_url']))
-                    #backdrop_path=os.path.join(self.mvbackdrops,imdb_id,self._picname(meta['backdrop_url']))
+                    if type == self.type_movie:
+                        cover_path = os.path.join(self.mvcovers, imdb_id, self._picname(meta['cover_url']))
+                        backdrop_path=os.path.join(self.mvbackdrops,imdb_id,self._picname(meta['backdrop_url']))
+                    elif type == self.type_tvshow:
+                        cover_path = os.path.join(self.tvcovers, imdb_id, self._picname(meta['cover_url']))
+                        backdrop_path=os.path.join(self.tvbackdrops,imdb_id,self._picname(meta['backdrop_url']))
+                    
 
                     #if paths exist, replace the urls with paths
                     if self.classmode == 'false':
                         if os.path.exists(cover_path):
                             meta['cover_url'] = cover_path
-                        #if os.path.exists(backdrop_path):
-                        #    meta['backdrop_url'] = backdrop_path
+                        if os.path.exists(backdrop_path):
+                            meta['backdrop_url'] = backdrop_path
 
                     #try some image redownloads if building container
                     elif self.classmode == 'true':
                         if not os.path.exists(cover_path):
-                                self._downloadimages(meta,'movies',imdb_id)
+                                self._downloadimages(meta,type,imdb_id)
 
-                        #if not os.path.exists(backdrop_path):
-                        #        self._downloadimages(meta,'movies',imdb_id)
-           
+                        if not os.path.exists(backdrop_path):
+                                self._downloadimages(meta,'movies',imdb_id)
+        
+        #We want to send back the name that was passed in   
+        meta['title'] = name
+        
         return meta
 
     
@@ -422,6 +468,7 @@ class MetaData:
         #self.dbcur.execute('CREATE INDEX IF NOT EXISTS nameindex on tvshow_meta (name);')
         print 'Table season_meta created'
 
+
     def _cache_lookup_by_imdb(self, imdb_id, type):
         '''
         Lookup in SQL DB for video meta data by IMDB ID
@@ -433,17 +480,20 @@ class MetaData:
         Returns:
             DICT of matched meta data or None if no match.
         '''        
-        if type == 'movie':
+        if type == self.type_movie:
             table='movie_meta'
-        elif type == 'tvshow':
+        elif type == self.type_tvshow:
             table='tvshow_meta'
 
-        self.dbcur.execute("SELECT * FROM " + table + " WHERE imdb_id = '%s'" % imdb_id)
+        sql_select = "SELECT * FROM " + table + " WHERE imdb_id = '%s'" % imdb_id
+        print 'SQL Select: %s' % sql_select
+        self.dbcur.execute(sql_select)
         matchedrow = self.dbcur.fetchone()
         if matchedrow:
             print 'Found meta information by imdb id in cache table: ', dict(matchedrow)
             return dict(matchedrow)
         else:
+            print 'No match in local DB'
             return None
     
 
@@ -461,25 +511,28 @@ class MetaData:
         Returns:
             DICT of matched meta data or None if no match.
         '''        
-        if type == 'movie':
+        if type == self.type_movie:
             table='movie_meta'
-        elif type == 'tvshow':
+        elif type == self.type_tvshow:
             table='tvshow_meta'
         name = name.replace("'","''")
         
+        name =  self._clean_string(name.lower())
         sql_select = "SELECT * FROM " + table + " WHERE title = '%s'" % name       
         if year:
             sql_select = sql_select + " AND strftime('%s',premiered) = '%s'" % ('%Y', year)
+        print 'SQL Select: %s' % sql_select            
         self.dbcur.execute(sql_select)            
         matchedrow = self.dbcur.fetchone()
         if matchedrow:
             print 'Found meta information by name in cache table: ', dict(matchedrow)
             return dict(matchedrow)
         else:
+            print 'No match in local DB'            
             return None
                        
 
-    def _cache_save_video_meta(self, meta, type):
+    def _cache_save_video_meta(self, meta, name, type):
         '''
         Saves meta data to SQL table given type
         
@@ -488,10 +541,13 @@ class MetaData:
             type (str): 'movie' or 'tvshow'
                         
         '''            
-        if type == 'movie':
+        if type == self.type_movie:
             table='movie_meta'
-        elif type == 'tvshow':
+        elif type == self.type_tvshow:
             table='tvshow_meta'
+        
+        #strip title
+        meta['title'] =  self._clean_string(name.lower())
         
         #Select on either IMDB ID or name + premiered
         if meta['code']:
@@ -503,7 +559,7 @@ class MetaData:
             self.dbcur.execute(sql_select) #select database row
             matchedrow = self.dbcur.fetchone()
             if matchedrow:
-                    print 'Matched Row found, deleting table entry', matchedrow
+                    print 'Matched Row found, deleting table entry'
                     self.dbcur.execute("DELETE FROM " + table + " WHERE imdb_id = '%s'" % meta['code']) #delete database row where imdb_id matches
         except Exception, e:
             print 'Error attempting to delete from cache table: %s ' % e
@@ -516,7 +572,7 @@ class MetaData:
         
         print 'Saving cache information: ', meta         
         try:
-            if type == 'movie':
+            if type == self.type_movie:
                 self.dbcur.execute("INSERT INTO " + table + " VALUES "
                                    "(:imdb_id, :tmdb_id, :title, :director, :writer, :tagline, :cast, :rating, :duration, :plot, :mpaa, :premiered, :genre, :studio, :thumb_url, :cover_url, :trailer_url, :backdrop_url, :imgs_prepacked, :overlay)",
                                    meta
@@ -524,7 +580,7 @@ class MetaData:
                                    #% ( meta['code'], meta['tmdb_id'],meta['title'],meta['rating'],meta['duration'],meta['plot'],meta['mpaa'],
                                    #meta['premiered'],meta['genre'],meta['studio'],meta['thumb_url'],meta['cover_url'],meta['trailer_url'],meta['backdrop_url'],meta['imgs_prepacked'], meta['watched'])
                 )
-            elif type == 'tvshow':
+            elif type == self.type_tvshow:
                 self.dbcur.execute("INSERT INTO " + table + " VALUES "
                                    "(:imdb_id, :tvdb_id, :title, :cast, :rating, :duration, :plot, :mpaa, :premiered, :genre, :studio, :thumb_url, :cover_url, :trailer_url, :backdrop_url, :imgs_prepacked, :overlay)",
                                    meta
@@ -701,8 +757,7 @@ class MetaData:
         meta['mpaa'] = md.get('certification', '')
         meta['premiered'] = md.get('released', year)
         meta['trailer_url'] = md.get('trailer', '')
-        if md.has_key('imdb_genres'):
-            meta['genre'] = md.get('imdb_genres', '')
+        meta['genre'] = md.get('genre', '')
         
         #Get cast, director, writers
         cast_list = []
@@ -745,8 +800,7 @@ class MetaData:
                         print 'Studios failed: %s ' % md.get('studios', '')
                         pass
         
-        if md.has_key('imdb_poster'):
-            meta['cover_url'] = md.get('imdb_poster', '')
+        meta['cover_url'] = md.get('cover_url', '')
         if md.has_key('posters'):
             # find first thumb poster url
             for poster in md['posters']:
@@ -981,7 +1035,7 @@ class MetaData:
         meta = {}
         tvdb = TheTVDB()
         if dateSearch:
-            aired=self.get_date(season_num, episode_num)
+            aired=self._get_date(season_num, episode_num)
             episode = tvdb.get_episode_by_airdate(tvdb_id, aired)
             
             #We do this because the airdate method returns just a part of the overview unfortunately
@@ -1036,7 +1090,7 @@ class MetaData:
                                % (meta['code'], meta['tvdb_id'], meta['season'], meta['episode'], meta['title']) )
             matchedrow = self.dbcur.fetchone()
             if matchedrow:
-                    print 'Episode matched row found, deleting table entry', matchedrow
+                    print 'Episode matched row found, deleting table entry'
                     self.dbcur.execute('DELETE FROM episode_meta WHERE '
                                'imdb_id = "%s" AND tvdb_id = "%s" AND season = %s AND episode = %s AND title = "%s" ' 
                                % (meta['code'], meta['tvdb_id'], meta['season'], meta['episode'], meta['title']) ) 
@@ -1079,7 +1133,7 @@ class MetaData:
         if not imdb_id.startswith('tt'):
             imdb_id = "tt%s" % imdb_id
                 
-        if type == 'movie' or type == 'tvshow':
+        if type == self.type_movie or type == self.type_tvshow:
             watched = self.get_watched(imdb_id, type)
             if watched == 6:
                 self.update_watched(imdb_id, type, 7)
@@ -1115,9 +1169,9 @@ class MetaData:
             tvdb_id (str): tvdb id of tvshow                        
 
         '''      
-        if type == 'movie':
+        if type == self.type_movie:
             sql="UPDATE movie_meta SET overlay = " + str(new_value) + " WHERE imdb_id = '" + imdb_id + "'" 
-        elif type == 'tvshow':
+        elif type == self.type_tvshow:
             sql="UPDATE tvshow_meta SET overlay = " + str(new_value) + " WHERE imdb_id = '" + imdb_id + "'"
         elif type == 'episode':
             sql='UPDATE episode_meta SET overlay = ' + str(new_value) + ' WHERE imdb_id = "' + imdb_id + '" AND tvdb_id = "' + tvdb_id + '" AND season = "' + season + '" AND name = "' + name + '" '
@@ -1137,9 +1191,9 @@ class MetaData:
             type (str): type of video to update, 'movie', 'tvshow' or 'episode'                    
 
         ''' 
-        if type == 'movie':
+        if type == self.type_movie:
             table='movie_meta'
-        elif type == 'tvshow':
+        elif type == self.type_tvshow:
             table='tvshow_meta'
         
         self.dbcur.execute("SELECT * FROM " + table + " WHERE imdb_id = '%s'" % imdb_id)
@@ -1278,7 +1332,7 @@ class MetaData:
                                % ( meta['code'], meta['season'] ) ) 
             matchedrow = self.dbcur.fetchone()
             if matchedrow:
-                print 'Season matched row found, deleting table entry', matchedrow
+                print 'Season matched row found, deleting table entry'
                 self.dbcur.execute("DELETE FROM season_meta WHERE imdb_id = '%s' AND season ='%s' " 
                                    % ( meta['code'], meta['season'] ) )
         except Exception, e:
