@@ -11,6 +11,13 @@ from t0mm0.common.net import Net
 net = Net()
 
 class TMDB(object):
+    '''
+    This class performs TMDB and IMDB lookups.
+    
+    First call is made to TMDB by either IMDB ID or Name/Year depending on what is supplied. If movie is not found
+    or if there is data missing on TMDB, another call is made to IMDB to fill in the missing information.       
+    '''  
+    
     def __init__(self, api_key='b91e899ce561dd19695340c3b26e0a02', view='json', lang='en'):
         #view = yaml json xml
         self.view = view
@@ -23,6 +30,17 @@ class TMDB(object):
 
             
     def _do_request(self, method, values):
+        '''
+        Request JSON data from TMDB
+        
+        Args:
+            method (str): Type of TMDB request to make
+            values (str): Value to use in TMDB lookup request
+                        
+        Returns:
+            DICT of meta data found on TMDB
+            Returns None when not found or error requesting page
+        '''      
         url = "%s/%s/%s/%s/%s/%s" % (self.url_prefix, method, self.lang, self.view, self.api_key, values)
         print 'Requesting TMDB : %s' % url
         try:
@@ -39,17 +57,25 @@ class TMDB(object):
 
 
     def _convert_date(self, string):
-        ''' Quick helper method to convert a string date in format dd MMM YYYY to YYYY-MM-DD '''
+        ''' Helper method to convert a string date in format dd MMM YYYY to YYYY-MM-DD '''
         try:
-            d = datetime.strptime(string, '%d %b %Y')
-            e = d.strftime('%Y-%m-%d')
+            a = datetime.strptime(string, '%d %b %Y')
+            b = a.strftime('%Y-%m-%d')
+        except ValueError, e:
+            try:
+                a = datetime.strptime(string, '%b %Y')
+                b = a.strftime('%Y-%m-%d')
+            except Exception, e:
+                print 'Date conversion failed: %s' % e
+                return None                                       
         except Exception, e:
             print 'Date conversion failed: %s' % e
             return None
-        return e
+        return b
         
         
     def _upd_key(self, meta, key):
+        ''' Helper method to check if a key exists and if it has valid data, returns True if key needs to be udpated with valid data '''    
         if meta.has_key(key) == False :
             return True 
         else:
@@ -64,7 +90,19 @@ class TMDB(object):
 
 
     def search_imdb(self, name, imdb_id='', year=''):
+        '''
+        Search IMDB by either IMDB ID or Name/Year      
         
+        Args:
+            name (str): full name of movie you are searching            
+        Kwargs:
+            imdb_id (str): IMDB ID
+            year (str): 4 digit year of video, recommended to include the year whenever possible
+                        to maximize correct search results.
+                        
+        Returns:
+            DICT of meta data or None if cannot be found.
+        '''        
         #Set IMDB API URL based on the type of search we need to do
         if imdb_id:
             url = self.imdb_api % imdb_id
@@ -90,7 +128,16 @@ class TMDB(object):
         
 
     def update_imdb_meta(self, meta, imdb_meta):
-    
+        '''
+        Update dict TMDB meta with data found on IMDB where appropriate
+        
+        Args:
+            meta (dict): typically a container of meta data found on TMDB
+            imdb_meta (dict): container of meta data found on IMDB
+                       
+        Returns:
+            DICT of updated meta data container
+        '''        
         print 'Updating current meta with IMDB'
         
         if self._upd_key(meta, 'overview'):
@@ -100,9 +147,9 @@ class TMDB(object):
         
         if self._upd_key(meta, 'released'):
             print '-- IMDB - Updating Premiered'
-            temp=imdb_meta['Released']
-            if temp != 'N/A':
-                meta['released'] = self._convert_date(temp)
+            temp=self._convert_date(imdb_meta['Released'])
+            if temp:
+                meta['released'] = temp
             else:
                 if imdb_meta['Year'] != 'N/A':
                     meta['released'] = imdb_meta['Year'] + '-01-01'
@@ -148,20 +195,38 @@ class TMDB(object):
 
     # video_id is either tmdb or imdb id
     def _get_version(self, video_id):
+        ''' Helper method to start a TMDB getVersion request '''    
         return self._do_request('Movie.getVersion', video_id)
 
 
     def _get_info(self, tmdb_id):
+        ''' Helper method to start a TMDB getInfo request '''            
         return self._do_request('Movie.getInfo', tmdb_id)
         
 
     def _search_movie(self, name, year=''):
+        ''' Helper method to start a TMDB Movie.search request - search by Name/Year '''
         if year:
             name = urllib.quote(name) + '+' + year
         return self._do_request('Movie.search',name)
         
 
     def tmdb_lookup(self, name, imdb_id='', year=''):
+        '''
+        Main callable method which initiates the TMDB/IMDB meta data lookup
+        
+        Returns a final dict of meta data    
+        
+        Args:
+            name (str): full name of movie you are searching            
+        Kwargs:
+            imdb_id (str): IMDB ID
+            year (str): 4 digit year of video, recommended to include the year whenever possible
+                        to maximize correct search results.
+                        
+        Returns:
+            DICT of meta data
+        ''' 
         tmdb_id = ''
         meta = {}
         
