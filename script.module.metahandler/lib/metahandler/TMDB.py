@@ -5,7 +5,8 @@
 # also searches imdb (using http://www.imdbapi.com/) for missing info in movies or tvshows
 
 import simplejson
-import urllib, re, socket
+import urllib, re
+from datetime import datetime
 from t0mm0.common.net import Net         
 net = Net()
 
@@ -33,15 +34,28 @@ class TMDB(object):
         if meta == 'Nothing found.':
             return None
         else:
+            print 'TMDB Meta: ', meta            
             return meta
 
 
+    def _convert_date(self, string):
+        ''' Quick helper method to convert a string date in format dd MMM YYYY to YYYY-MM-DD '''
+        try:
+            d = datetime.strptime(string, '%d %b %Y')
+            e = d.strftime('%Y-%m-%d')
+        except Exception, e:
+            print 'Date conversion failed: %s' % e
+            return None
+        return e
+        
+        
     def _upd_key(self, meta, key):
         if meta.has_key(key) == False :
             return True 
         else:
             try:
-                if key == '' or key == '0.0' or key == '0' or key == 'None' or key == '[]' or key == 'No overview found.' or key == 'TBD':
+                bad_list = ['', '0.0', '0', 'None', '[]', 'No overview found.', 'TBD', None]
+                if meta[key] in bad_list:
                     return True
                 else:
                     return False
@@ -69,32 +83,50 @@ class TMDB(object):
             print "Error connecting to IMDB: %s " % e
             return {}
 
-        if not meta['Response'] == 'True':
-            return {}
-        else:
+        if meta['Response'] == 'True':
             return meta
+        else:
+            return {}
         
 
     def update_imdb_meta(self, meta, imdb_meta):
     
         print 'Updating current meta with IMDB'
+        
         if self._upd_key(meta, 'overview'):
+            print '-- IMDB - Updating Overview'
             if imdb_meta.has_key('Plot'):
                 meta['overview']=imdb_meta['Plot']           
         
-        if self._upd_key(meta, 'posters') and self._upd_key(meta, 'imdb_poster'):
+        if self._upd_key(meta, 'released'):
+            print '-- IMDB - Updating Premiered'
+            temp=imdb_meta['Released']
+            if temp != 'N/A':
+                meta['released'] = self._convert_date(temp)
+            else:
+                if imdb_meta['Year'] != 'N/A':
+                    meta['released'] = imdb_meta['Year'] + '-01-01'
+        
+        if self._upd_key(meta, 'posters'):
+            print '-- IMDB - Updating Posters'
             temp=imdb_meta['Poster']
             if temp != 'N/A':
-                meta['imdb_poster']=temp
+                meta['cover_url']=temp
+                
         if self._upd_key(meta, 'rating'):
+            print '-- IMDB - Updating Rating'
             temp=imdb_meta['Rating']
             if temp != 'N/A' and temp !='' and temp != None:
                 meta['rating']=temp
-        if self._upd_key(meta, 'genre') and self._upd_key(meta, 'imdb_genres'):
+                
+        if self._upd_key(meta, 'genre'):
+            print '-- IMDB - Updating Genre'
             temp=imdb_meta['Genre']
             if temp != 'N/A':
-                meta['imdb_genres']=temp
+                meta['genre']=temp
+                
         if self._upd_key(meta, 'runtime'):
+            print '-- IMDB - Updating Runtime'
             temp=imdb_meta['Runtime']
             if temp != 'N/A':
                 dur=0
@@ -115,15 +147,15 @@ class TMDB(object):
 
 
     # video_id is either tmdb or imdb id
-    def getVersion(self, video_id):
+    def _get_version(self, video_id):
         return self._do_request('Movie.getVersion', video_id)
 
 
-    def getInfo(self, tmdb_id):
+    def _get_info(self, tmdb_id):
         return self._do_request('Movie.getInfo', tmdb_id)
         
 
-    def searchMovie(self, name, year=''):
+    def _search_movie(self, name, year=''):
         if year:
             name = urllib.quote(name) + '+' + year
         return self._do_request('Movie.search',name)
@@ -135,7 +167,7 @@ class TMDB(object):
         
         #If we don't have an IMDB ID let's try searching TMDB first by movie name
         if not imdb_id:
-            meta = self.searchMovie(name,year)              
+            meta = self._search_movie(name,year)              
             if meta:
                 tmdb_id = meta['id']
                 imdb_id = meta['imdb_id']
@@ -144,25 +176,28 @@ class TMDB(object):
             else:
                 meta = self.search_imdb(name, imdb_id, year)
                 if meta:
-                    imdb_id = meta['ID']       
+                    imdb_id = meta['ID']
+                                                 
 
         #If we don't have a tmdb_id yet but do have imdb_id lets see if we can find it
         if not tmdb_id and imdb_id:
-            meta = self.getVersion(imdb_id)
+            print 'IMDB ID found, attempting to get TMDB ID'
+            meta = self._get_version(imdb_id)
             if meta:
                 tmdb_id = meta['id']
 
         if tmdb_id:
-            meta = self._do_request('Movie.getInfo', tmdb_id)
+            meta = self._get_info(tmdb_id)
 
             if meta is None: # fall through to IMDB lookup
                 meta = {}
             else:               
                 
-                if meta['overview'] == 'None' or meta['overview'] == '' or meta['overview'] == 'TBD' or meta['overview'] == 'No overview found.' or meta['rating'] == 0 or meta['runtime'] == 0 or str(meta['genres']) == '[]' or str(meta['posters']) == '[]':
+                if meta['overview'] == 'None' or meta['overview'] == '' or meta['overview'] == 'TBD' or meta['overview'] == 'No overview found.' or meta['rating'] == 0 or meta['runtime'] == 0 or str(meta['genres']) == '[]' or str(meta['posters']) == '[]' or meta['released'] == None:
                     print 'Some info missing in TMDB for Movie *** %s ***. Will search imdb for more' % imdb_id
                     imdb_meta = self.search_imdb(name, imdb_id)
-                    meta = self.update_imdb_meta(meta, imdb_meta)
+                    if imdb_meta:
+                        meta = self.update_imdb_meta(meta, imdb_meta)
         
         #If all else fails, and we don't have a TMDB id
         else:
@@ -173,35 +208,3 @@ class TMDB(object):
        
         meta['code'] = imdb_id
         return meta
-
-
-    def get_date(self, year, month_day):
-        month_name = month_day[:3]
-        day=month_day[4:]
-        
-        if month_name=='Jan':
-            month='01'
-        elif month_name=='Feb':
-            month='02'
-        elif month_name=='Mar':
-            month='03'
-        elif month_name=='Apr':
-            month='04'
-        elif month_name=='May':
-            month='05'
-        elif month_name=='Jun':
-            month='06'
-        elif month_name=='Jul':
-            month='07'
-        elif month_name=='Aug':
-            month='08'
-        elif month_name=='Sep':
-            month='09'
-        elif month_name=='Oct':
-            month='10'
-        elif month_name=='Nov':
-            month='11'
-        elif month_name=='Dec':
-            month='12'
-               
-        return year + '-' + month + '-' + day
