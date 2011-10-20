@@ -86,6 +86,7 @@ class MetaData:
         #set movie/tvshow constants
         self.type_movie = 'movie'
         self.type_tvshow = 'tvshow'
+        self.type_episode = 'episode'
             
         #this init auto-constructs necessary folder hierarchies.
 
@@ -116,7 +117,7 @@ class MetaData:
         self.dbcon.close()
 
 
-    def _init_tvshow_meta(self, imdb_id, tvdb_id, name, premiered):
+    def _init_tvshow_meta(self, imdb_id, tvdb_id, name):
         '''
         Initializes a tvshow_meta dictionary with default values, to ensure we always
         have all fields
@@ -137,7 +138,7 @@ class MetaData:
         meta['duration'] = 0
         meta['plot'] = ''
         meta['mpaa'] = ''
-        meta['premiered'] = premiered
+        meta['premiered'] = ''
         meta['trailer_url'] = ''
         meta['genre'] = ''
         meta['studio'] = ''
@@ -153,7 +154,7 @@ class MetaData:
         return meta
 
 
-    def _init_movie_meta(self, imdb_id, tmdb_id, name, premiered):
+    def _init_movie_meta(self, imdb_id, tmdb_id, name, year):
         '''
         Initializes a movie_meta dictionary with default values, to ensure we always
         have all fields
@@ -170,6 +171,7 @@ class MetaData:
         meta['code'] = imdb_id
         meta['tmdb_id'] = tmdb_id
         meta['title'] = name
+        meta['year'] = year        
         meta['writer'] = ''
         meta['director'] = ''
         meta['tagline'] = ''
@@ -178,7 +180,7 @@ class MetaData:
         meta['duration'] = 0
         meta['plot'] = ''
         meta['mpaa'] = ''
-        meta['premiered'] = premiered
+        meta['premiered'] = ''
         meta['trailer_url'] = ''
         meta['genre'] = ''
         meta['studio'] = ''
@@ -324,7 +326,7 @@ class MetaData:
         Args:
             imdb_id (str): IMDB ID
             type (str): 'movie' or 'tvshow'
-            name (str): full name of movie/tvshow you are searching            
+            name (int): full name of movie/tvshow you are searching            
         Kwargs:
             year (str): 4 digit year of video, recommended to include the year whenever possible
                         to maximize correct search results.
@@ -354,7 +356,6 @@ class MetaData:
             elif type==self.type_tvshow:
                 meta = self._get_tvdb_meta(imdb_id, name, year)
                        
-            meta['overlay'] = self.get_watched( imdb_id, self.type_movie)
             self._cache_save_video_meta(meta, name, type)
 
             #if creating a metadata container, download the images.
@@ -407,7 +408,7 @@ class MetaData:
                  
         # split text across lines to make it easier to understand
         self.dbcur.execute("CREATE TABLE IF NOT EXISTS movie_meta ("
-                           "imdb_id TEXT, tmdb_id TEXT, title TEXT,"
+                           "imdb_id TEXT, tmdb_id TEXT, title TEXT, year INTEGER,"
                            "director TEXT, writer TEXT, tagline TEXT, cast TEXT,"
                            "rating FLOAT, duration TEXT, plot TEXT,"
                            "mpaa TEXT, premiered TEXT, genre TEXT, studio TEXT,"
@@ -415,7 +416,7 @@ class MetaData:
                            "trailer_url TEXT, backdrop_url TEXT,"
                            "imgs_prepacked TEXT," # 'true' or 'false'. added to determine whether to load imgs from path not url (ie. if they are included in pre-packaged metadata container).
                            "overlay INTEGER,"
-                           "UNIQUE(imdb_id, tmdb_id, title)"
+                           "UNIQUE(imdb_id, tmdb_id, title, year)"
                            ");"
         )
         self.dbcur.execute('CREATE INDEX IF NOT EXISTS nameindex on movie_meta (title);')
@@ -520,7 +521,7 @@ class MetaData:
         name =  self._clean_string(name.lower())
         sql_select = "SELECT * FROM " + table + " WHERE title = '%s'" % name       
         if year:
-            sql_select = sql_select + " AND strftime('%s',premiered) = '%s'" % ('%Y', year)
+            sql_select = sql_select + " AND year = %s" % year
         print 'SQL Select: %s' % sql_select            
         self.dbcur.execute(sql_select)            
         matchedrow = self.dbcur.fetchone()
@@ -553,7 +554,7 @@ class MetaData:
         if meta['code']:
             sql_select = "SELECT * FROM " + table + " WHERE imdb_id = '%s'" % meta['code']
         else:           
-            sql_select = "SELECT * FROM " + table + " WHERE title = '%s' AND premiered = '%s'" % (meta['title'], meta['premiered'])
+            sql_select = "SELECT * FROM " + table + " WHERE title = '%s' AND year = '%s'" % (meta['title'], meta['year'])
             
         try:
             self.dbcur.execute(sql_select) #select database row
@@ -574,7 +575,7 @@ class MetaData:
         try:
             if type == self.type_movie:
                 self.dbcur.execute("INSERT INTO " + table + " VALUES "
-                                   "(:imdb_id, :tmdb_id, :title, :director, :writer, :tagline, :cast, :rating, :duration, :plot, :mpaa, :premiered, :genre, :studio, :thumb_url, :cover_url, :trailer_url, :backdrop_url, :imgs_prepacked, :overlay)",
+                                   "(:imdb_id, :tmdb_id, :title, :year, :director, :writer, :tagline, :cast, :rating, :duration, :plot, :mpaa, :premiered, :genre, :studio, :thumb_url, :cover_url, :trailer_url, :backdrop_url, :imgs_prepacked, :overlay)",
                                    meta
                                    #"('%s', '%s', '%s', %s, %s, '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s')"
                                    #% ( meta['code'], meta['tmdb_id'],meta['title'],meta['rating'],meta['duration'],meta['plot'],meta['mpaa'],
@@ -645,17 +646,11 @@ class MetaData:
         tvdb = TheTVDB()
         tvdb_id = ''
         
-        #Ensure year has a set value
-        if year:
-            year = year + '-01-01'
-        else:
-            year = ''
-
         if imdb_id:
             tvdb_id = tvdb.get_show_by_imdb(imdb_id)
 
         #Intialize tvshow meta dictionary
-        meta = self._init_tvshow_meta(imdb_id, tvdb_id, name, year)
+        meta = self._init_tvshow_meta(imdb_id, tvdb_id, name)
 
         # if not found by imdb, try by name
         if tvdb_id == '':
@@ -739,12 +734,6 @@ class MetaData:
             these "None found" entries otherwise we hit tvdb alot.
         '''      
         
-        #Ensure year has a set value
-        if year:
-            year = year + '-01-01'
-        else:
-            year = ''
-
         #Intialize movie_meta dictionary    
         meta = self._init_movie_meta(imdb_id, md.get('id', ''), name, year)
         
@@ -754,11 +743,8 @@ class MetaData:
         meta['rating'] = md.get('rating', 0)
         meta['duration'] = str(md.get('runtime', 0))
         meta['plot'] = md.get('overview', '')
-        meta['mpaa'] = md.get('certification', '')
-        
-        #Last fail safe to ensure premiered has a value
-        meta['premiered'] = md.get('released', year)
-        
+        meta['mpaa'] = md.get('certification', '')       
+        meta['premiered'] = md.get('released', '')       
         meta['trailer_url'] = md.get('trailer', '')
         meta['genre'] = md.get('genre', '')
         
@@ -877,7 +863,7 @@ class MetaData:
                 meta['trailer_url']=''
                 meta['premiered']=meta['premiered']
                 meta = self._get_tv_extra(meta)
-                meta['overlay'] = self.get_watched_episode(meta)
+                meta['overlay'] = self._get_watched_episode(meta)
                 
                 self._cache_save_episode_meta(meta)
                 
@@ -913,7 +899,7 @@ class MetaData:
             meta['trailer_url']=''
             meta['premiered']=meta['premiered']
             meta = self._get_tv_extra(meta)
-            meta['overlay'] = self.get_watched_episode(meta)
+            meta['overlay'] = self._get_watched_episode(meta)
             self._cache_save_episode_meta(meta)
         
         else:
@@ -1119,7 +1105,7 @@ class MetaData:
             pass        
 
 
-    def change_watched(self, imdb_id, type, name, season=''):
+    def change_watched(self, type, name, imdb_id='', season='', year=''):
         '''
         Change watched status on video
         
@@ -1137,12 +1123,12 @@ class MetaData:
             imdb_id = "tt%s" % imdb_id
                 
         if type == self.type_movie or type == self.type_tvshow:
-            watched = self.get_watched(imdb_id, type)
+            watched = self._get_watched(imdb_id, type)
             if watched == 6:
-                self.update_watched(imdb_id, type, 7)
+                self._update_watched(imdb_id, type, 7)
             else:
-                self.update_watched(imdb_id, type, 6)
-        elif type == 'episode':
+                self._update_watched(imdb_id, type, 6)
+        elif type == self.type_episode:
             tvdb_id = self._get_tvdb_id(imdb_id)
             if tvdb_id is None:
                 tvdb_id = ''
@@ -1151,14 +1137,14 @@ class MetaData:
             tmp_meta['tvdb_id'] = tvdb_id 
             tmp_meta['season']  = season
             tmp_meta['name']    = name
-            watched = self.get_watched_episode(tmp_meta)
+            watched = self._get_watched_episode(tmp_meta)
             if watched == 6:
-                self.update_watched(imdb_id, type, 7, name=name, season=season, tvdb_id=tvdb_id)
+                self._update_watched(imdb_id, type, 7, name=name, season=season, tvdb_id=tvdb_id)
             else:
-                self.update_watched(imdb_id, type, 6, name=name, season=season, tvdb_id=tvdb_id)
+                self._update_watched(imdb_id, type, 6, name=name, season=season, tvdb_id=tvdb_id)
                 
     
-    def update_watched(self, imdb_id, type, new_value, name='', season='', tvdb_id=''):
+    def _update_watched(self, imdb_id, type, new_value, name='', season='', tvdb_id=''):
         '''
         Commits the DB update for the watched status
         
@@ -1185,7 +1171,7 @@ class MetaData:
         self.dbcon.commit()
     
    
-    def get_watched(self, imdb_id, type):
+    def _get_watched(self, imdb_id, type):
         '''
         Finds the watched status of the video from the cache db
         
@@ -1207,7 +1193,7 @@ class MetaData:
             return 6
 
         
-    def get_watched_episode(self, meta):
+    def _get_watched_episode(self, meta):
         '''
         Finds the watched status of the video from the cache db
         
@@ -1225,7 +1211,7 @@ class MetaData:
             return 6
     
 
-    def find_cover(self, season, images):
+    def _find_cover(self, season, images):
         '''
         Finds the url of the banner to be used as the cover 
         from a list of images for a given season
@@ -1275,13 +1261,13 @@ class MetaData:
                 if tvdb_id is None or tvdb_id == '':
                     meta['cover_url']=''
                 elif images:
-                    meta['cover_url']=self.find_cover(season, images )
+                    meta['cover_url']=self._find_cover(season, images )
                 else:
                     if len(season) == 4:
                         meta['cover_url']=''
                     else:
                         images = self._get_season_posters(tvdb_id, season)
-                        meta['cover_url']=self.find_cover(season, images )
+                        meta['cover_url']=self._find_cover(season, images )
                         
                 meta['season']=season
                 meta['tvdb_id'] = tvdb_id
