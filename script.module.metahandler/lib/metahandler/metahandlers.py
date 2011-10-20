@@ -1135,8 +1135,8 @@ class MetaData:
             tmp_meta = {}
             tmp_meta['code'] = imdb_id
             tmp_meta['tvdb_id'] = tvdb_id 
+            tmp_meta['title'] = name
             tmp_meta['season']  = season
-            tmp_meta['name']    = name
             watched = self._get_watched_episode(tmp_meta)
             if watched == 6:
                 self._update_watched(imdb_id, type, 7, name=name, season=season, tvdb_id=tvdb_id)
@@ -1151,7 +1151,7 @@ class MetaData:
         Args:
             imdb_id (str): IMDB ID
             type (str): type of video to update, 'movie', 'tvshow' or 'episode'
-            newvalue (str): value to update overlay field with
+            new_value (str): value to update overlay field with
         Kwargs:
             name (str): name of video        
             season (str): season number
@@ -1159,16 +1159,21 @@ class MetaData:
 
         '''      
         if type == self.type_movie:
-            sql="UPDATE movie_meta SET overlay = " + str(new_value) + " WHERE imdb_id = '" + imdb_id + "'" 
+            sql="UPDATE movie_meta SET overlay = %s WHERE imdb_id = '%s'" % (new_value, imdb_id)
         elif type == self.type_tvshow:
-            sql="UPDATE tvshow_meta SET overlay = " + str(new_value) + " WHERE imdb_id = '" + imdb_id + "'"
+            sql="UPDATE tvshow_meta SET overlay = %s WHERE imdb_id = '%s'" % (new_value, imdb_id)
         elif type == 'episode':
-            sql='UPDATE episode_meta SET overlay = ' + str(new_value) + ' WHERE imdb_id = "' + imdb_id + '" AND tvdb_id = "' + tvdb_id + '" AND season = "' + season + '" AND name = "' + name + '" '
+            sql="UPDATE episode_meta SET overlay = '%s' WHERE imdb_id = '%s' AND tvdb_id = '%s' AND season = %s AND title = '%s'" % (new_value, imdb_id, tvdb_id, season, name)
         else: # Something went really wrong
             return None
         
-        self.dbcur.execute(sql)
-        self.dbcon.commit()
+        try:
+            print 'Updating watched status for type: %s, imdb id: %s, new value: %s' % (type, imdb_id, new_value)
+            self.dbcur.execute(sql)
+            self.dbcon.commit()
+        except Exception, e:
+            print 'Error attempting to update table: %s ' % e
+            pass    
     
    
     def _get_watched(self, imdb_id, type):
@@ -1185,8 +1190,13 @@ class MetaData:
         elif type == self.type_tvshow:
             table='tvshow_meta'
         
-        self.dbcur.execute("SELECT * FROM " + table + " WHERE imdb_id = '%s'" % imdb_id)
-        matchedrow = self.dbcur.fetchone()
+        try:
+            self.dbcur.execute("SELECT * FROM " + table + " WHERE imdb_id = '%s'" % imdb_id)
+            matchedrow = self.dbcur.fetchone()
+        except Exception, e:
+            print 'Error attempting to select from %s table: %s ' % (table, e)
+            pass  
+                    
         if matchedrow:
             return dict(matchedrow)['overlay']
         else:
