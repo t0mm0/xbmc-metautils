@@ -32,7 +32,7 @@ class MetaContainer:
         self.work_path = os.path.join(self.path, 'work')
      
    
-    def _del_metadir(self, path=self.path):
+    def _del_metadir(self, path=path):
         #pass me the path the meta_caches is in
     
         meta_caches=os.path.join(path,'meta_caches')
