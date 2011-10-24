@@ -7,6 +7,7 @@
 import simplejson
 import urllib, re
 from datetime import datetime
+import time
 from t0mm0.common.net import Net         
 net = Net()
 
@@ -56,22 +57,48 @@ class TMDB(object):
             return meta
 
 
-    def _convert_date(self, string):
-        ''' Helper method to convert a string date in format dd MMM YYYY to YYYY-MM-DD '''
+    def _do_request_all(self, method, values):
+        '''
+        Request JSON data from TMDB, returns all matches found
+        
+        Args:
+            method (str): Type of TMDB request to make
+            values (str): Value to use in TMDB lookup request
+                        
+        Returns:
+            DICT of meta data found on TMDB
+            Returns None when not found or error requesting page
+        '''      
+        url = "%s/%s/%s/%s/%s/%s" % (self.url_prefix, method, self.lang, self.view, self.api_key, values)
+        print 'Requesting TMDB : %s' % url
         try:
-            a = datetime.strptime(string, '%d %b %Y')
-            b = a.strftime('%Y-%m-%d')
-        except ValueError, e:
-            try:
-                a = datetime.strptime(string, '%b %Y')
-                b = a.strftime('%Y-%m-%d')
-            except Exception, e:
-                print 'Date conversion failed: %s' % e
-                return None                                       
+            meta = simplejson.loads(net.http_GET(url).content)
+        except Exception, e:
+            print "Error connecting to TMDB: %s " % e
+            return None
+
+        if meta == 'Nothing found.':
+            return None
+        else:
+            print 'TMDB Meta: ', meta            
+            return meta
+
+
+    def convert_date(self, string, in_format, out_format):
+        ''' Helper method to convert a string date to a given format '''
+        
+        #Legacy check, Python 2.4 does not have strptime attribute, instroduced in 2.5
+        if hasattr(datetime, 'strptime'):
+            strptime = datetime.strptime
+        else:
+            strptime = lambda date_string, format: datetime(*(time.strptime(date_string, format)[0:6]))
+        
+        try:
+            a = strptime(string, in_format).strftime(out_format)
         except Exception, e:
             print 'Date conversion failed: %s' % e
             return None
-        return b
+        return a
         
         
     def _upd_key(self, meta, key):
@@ -147,7 +174,12 @@ class TMDB(object):
         
         if self._upd_key(meta, 'released'):
             print '-- IMDB - Updating Premiered'
-            temp=self._convert_date(imdb_meta['Released'])
+            
+            temp=self.convert_date(imdb_meta['Released'], '%d %b %Y', '%Y-%m-%d')
+            #May have failed, lets try a different format
+            if not temp:
+                temp=self.convert_date(imdb_meta['Released'], '%b %Y', '%Y-%m-%d')
+            
             if temp:
                 meta['released'] = temp
             else:
@@ -211,7 +243,22 @@ class TMDB(object):
         return self._do_request('Movie.search',name)
         
 
-    def tmdb_lookup(self, name, imdb_id='', year=''):
+    def tmdb_search(self, name):
+        '''
+        Used primarily to update a single movie meta data by providing a list of possible matches
+        
+        Returns a tuple of matches containing movie name and imdb id
+        
+        Args:
+            name (str): full name of movie you are searching            
+                        
+        Returns:
+            DICT of matches
+        '''
+        return self._do_request_all('Movie.search',name)
+        
+        
+    def tmdb_lookup(self, name, imdb_id='', tmdb_id='', year=''):
         '''
         Main callable method which initiates the TMDB/IMDB meta data lookup
         
@@ -227,11 +274,10 @@ class TMDB(object):
         Returns:
             DICT of meta data
         ''' 
-        tmdb_id = ''
         meta = {}
         
-        #If we don't have an IMDB ID let's try searching TMDB first by movie name
-        if not imdb_id:
+        #If we don't have an IMDB ID or TMDB ID let's try searching TMDB first by movie name
+        if not imdb_id and not tmdb_id:
             meta = self._search_movie(name,year)              
             if meta:
                 tmdb_id = meta['id']
@@ -239,13 +285,12 @@ class TMDB(object):
             
             #Didn't get a match by name at TMDB, let's try IMDB by name
             else:
-                meta = self.search_imdb(name, imdb_id, year)
+                meta = self.search_imdb(name, year=year)
                 if meta:
-                    imdb_id = meta['ID']
-                                                 
+                    imdb_id = meta['ID']                         
 
         #If we don't have a tmdb_id yet but do have imdb_id lets see if we can find it
-        if not tmdb_id and imdb_id:
+        elif imdb_id and not tmdb_id:
             print 'IMDB ID found, attempting to get TMDB ID'
             meta = self._get_version(imdb_id)
             if meta:
