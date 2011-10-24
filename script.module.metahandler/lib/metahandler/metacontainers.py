@@ -26,64 +26,13 @@ else:
 
 class MetaContainer:
 
-    def __init__(self, path='special://profile/addon_data/script.module.metahandler/work'):
-        #!!!! This must be matched to workdir in meteahandler.py MetaData __init__
+    def __init__(self, path='special://profile/addon_data/script.module.metahandler'):
+        #!!!! This must be matched to the path in meteahandler.py MetaData __init__
         self.path = xbmc.translatePath(path)
-                
-    
-    def _updir(self, thepath, x):
-            # move up x directories on thepath
-            while x > 0:
-                x -= 1
-                thepath = (os.path.split(thepath))[0]
-            return thepath
+        self.work_path = os.path.join(self.path, 'work')
      
-
-    def create_metadata_container(self):
-    
-        from cleaners import *
-        import clean_dirs
-    
-        sys.path.append(_updir(os.getcwd(),))
-        import default
-    
-        ####  Create a full metadata cache  ####
-        # Note: please update this with the latest code from MOVIEINDEX and TVINDEX  (from default.py)
-    
-        #!!!! This must be matched to workdir in meteahandler.py MetaData __init__
-        workdir = self.path
-        
-        print '### BUILDING CONTAINER IN:',workdir
-        print ' '
-    
-        print '### Adding movies to database ###'
-        print ' '
-        print ' '
-    
-        #scrape A-Z of all tv shows
-        default.TVA2ZDirectories('')
-    
-        print '### FINISHED Adding movies to database ###'
-        print ' '
-        print ' '
-    
-        print '### Adding TV Shows to database ###'
-        print ' '
-        print ' '
-        
-        #scrape A-Z of all movies
-        default.MOVIEA2ZDirectories('')
-    
-        print '### FINISHED Adding TV Shows to database ###'
-        print ' '
-        print ' '
-    
-        print '### Cleaning image directories of empty sub-directories [Running clean_dirs.py]'
-        clean_dirs.do_clean(workdir)
-    
-        print '### Container Making is Finished ###'
-    
-    def _del_metadir(self, path):
+   
+    def _del_metadir(self, path=self.path):
         #pass me the path the meta_caches is in
     
         meta_caches=os.path.join(path,'meta_caches')
@@ -172,6 +121,3 @@ class MetaContainer:
         else:                          
             print 'Not running under xbmc :( install container function unavaliable.'
             return False
-    
-    if __name__ == "__main__":
-        create_metadata_container(os.getcwd())
