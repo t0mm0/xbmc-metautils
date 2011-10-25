@@ -439,6 +439,13 @@ class MetaData:
             #Change cast back into a tuple
             if meta['cast']:
                 meta['cast'] = eval(meta['cast'])
+                
+            #Return a trailer link that will play via youtube addon
+            try:
+                trailer_id = re.match('^[^v]+v=(.{11}).*', trailer_url).group(1)
+                meta['trailer'] = 'plugin://plugin.video.youtube/?action=play_video&videoid=%s' % trailer_id
+            except:
+                meta['trailer'] = ''
             
             #if cache row says there are pre-packed images then either use them or create them
             if meta['imgs_prepacked'] == 'true':
