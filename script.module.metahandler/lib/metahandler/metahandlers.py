@@ -25,6 +25,8 @@ import os
 import re
 import sys
 import xbmc, xbmcaddon
+from datetime import datetime
+import time
 from TMDB import TMDB
 from thetvdbapi import TheTVDB
 
@@ -200,7 +202,7 @@ class MetaData:
             DICT in the structure of what is required to write to the DB
         '''          
         meta = {}
-        meta['code'] = imdb_id
+        meta['imdb_id'] = imdb_id
         meta['tvdb_id'] = tvdb_id
         meta['title'] = name
         meta['rating'] = 0
@@ -236,11 +238,14 @@ class MetaData:
         Returns:
             DICT in the structure of what is required to write to the DB
         '''                
+        if year:
+            year = int(year)
+            
         meta = {}
-        meta['code'] = imdb_id
+        meta['imdb_id'] = imdb_id
         meta['tmdb_id'] = tmdb_id
         meta['title'] = name
-        meta['year'] = year        
+        meta['year'] = year
         meta['writer'] = ''
         meta['director'] = ''
         meta['tagline'] = ''
@@ -286,6 +291,24 @@ class MetaData:
             return string
  
 
+    def _convert_date(self, string, in_format, out_format):
+        ''' Helper method to convert a string date to a given format '''
+        
+        #Legacy check, Python 2.4 does not have strptime attribute, instroduced in 2.5
+        #if hasattr(datetime, 'strptime'):
+        #    strptime = datetime.strptime
+        #else:
+        #    strptime = lambda date_string, format: datetime(*(time.strptime(date_string, format)[0:6]))
+        
+        strptime = lambda date_string, format: datetime(*(time.strptime(date_string, format)[0:6]))
+        try:
+            a = strptime(string, in_format).strftime(out_format)
+        except Exception, e:
+            print '************* Error Date conversion failed: %s' % e
+            return None
+        return a
+        
+        
     def _get_date(self, year, month_day):
         month_name = month_day[:3]
         day=month_day[4:]
@@ -393,10 +416,10 @@ class MetaData:
         if no IMDB ID supplied.       
         
         Args:
-            imdb_id (str): IMDB ID
             type (str): 'movie' or 'tvshow'
             name (int): full name of movie/tvshow you are searching            
         Kwargs:
+            imdb_id (str): IMDB ID        
             tmdb_id (str): TMDB ID
             year (str): 4 digit year of video, recommended to include the year whenever possible
                         to maximize correct search results.
@@ -424,7 +447,6 @@ class MetaData:
             
             if type==self.type_movie:
                 meta = self._get_tmdb_meta(imdb_id, tmdb_id, name, year)
-                meta = self._format_tmdb_meta(meta, imdb_id, name, year)                
             elif type==self.type_tvshow:
                 meta = self._get_tvdb_meta(imdb_id, name, year)
                        
@@ -442,7 +464,7 @@ class MetaData:
                 
             #Return a trailer link that will play via youtube addon
             try:
-                trailer_id = re.match('^[^v]+v=(.{11}).*', trailer_url).group(1)
+                trailer_id = re.match('^[^v]+v=(.{3,11}).*', meta['trailer_url']).group(1)
                 meta['trailer'] = 'plugin://plugin.video.youtube/?action=play_video&videoid=%s' % trailer_id
             except:
                 meta['trailer'] = ''
@@ -480,6 +502,39 @@ class MetaData:
         return meta  
 
 
+    def update_meta(self, name, old_imdb_id, old_tmdb_id, new_imdb_id='', new_tmdb_id='', year=''):
+        '''
+        Updates and returns meta data for given movie, 
+        mainly to be used with refreshing individual movies.
+        
+        Searches local cache DB for record, delete if found, calls get_meta() to grab new data
+               
+        
+        Args:
+            name (int): full name of movie you are searching            
+        Kwargs:
+            imdb_id (str): IMDB ID        
+            tmdb_id (str): TMDB ID
+            year (str): 4 digit year of video, recommended to include the year whenever possible
+                        to maximize correct search results.
+                        
+        Returns:
+            DICT of meta data or None if cannot be found.
+        '''
+        
+        if old_imdb_id:
+            meta = self._cache_lookup_by_id('movie', imdb_id=old_imdb_id)
+        elif old_tmdb_id:
+            meta = self._cache_lookup_by_id('movie', tmdb_id=old_tmdb_id)
+        else:
+            meta = self._cache_lookup_by_name('movie', name, year)
+        
+        if meta:
+            self._cache_delete_video_meta(meta['imdb_id'], meta['tmdb_id'], meta['title'], meta['year'])
+            
+        return self.get_meta(self.type_movie, name, new_imdb_id, new_tmdb_id, year)
+        
+
     def _cache_lookup_by_id(self, type, imdb_id='', tmdb_id=''):
         '''
         Lookup in SQL DB for video meta data by IMDB ID
@@ -508,7 +563,7 @@ class MetaData:
             self.dbcur.execute(sql_select)
             matchedrow = self.dbcur.fetchone()            
         except Exception, e:
-            print 'Error selecting from cache db: %s' % e
+            print '************* Error selecting from cache db: %s' % e
             return None
         
         if matchedrow:
@@ -572,23 +627,35 @@ class MetaData:
         meta['title'] =  self._clean_string(name.lower())
         
         #Select on either IMDB ID or name + premiered
-        if meta['code']:
-            sql_select = "SELECT * FROM " + table + " WHERE imdb_id = '%s'" % meta['code']
+        if meta['imdb_id']:
+            sql_select = "SELECT * FROM %s WHERE imdb_id = '%s'" % (table, meta['imdb_id'])
         else:           
-            sql_select = "SELECT * FROM " + table + " WHERE title = '%s' AND year = '%s'" % (meta['title'], meta['year'])
-            
-        try:
+            sql_select = "SELECT * FROM %s WHERE title = '%s'" % (table, meta['title'])
+            if meta['year']:
+                sql_select = sql_select + " AND year = '%s'" % meta['year']
+
+        print 'Checking if entry already exists in cache table: %s' % table
+        print 'SQL SELECT: %s' % sql_select            
+        
+        try:          
             self.dbcur.execute(sql_select) #select database row
             matchedrow = self.dbcur.fetchone()
-            if matchedrow:
-                    print 'Matched Row found, deleting table entry'
-                    self.dbcur.execute("DELETE FROM " + table + " WHERE imdb_id = '%s'" % meta['code']) #delete database row where imdb_id matches
         except Exception, e:
-            print 'Error attempting to delete from cache table: %s ' % e
-            print 'Meta data:', meta               
+            print '************* Error attempting to select from table: %s with error: %s' % (table, e)
             pass
+            
+        if matchedrow:
+            print 'Matched Row found, deleting table entry'
+            sql_delete = "DELETE FROM %s WHERE imdb_id = '%s'" % (table, meta['imdb_id'])
+            print 'SQL DELETE: %s' % sql_delete       
+            
+            try:
+                self.dbcur.execute(sql_delete)
+            except Exception, e:
+                print '************* Error attempting to delete from cache table: %s ' % e
+                print 'Meta data:', meta               
+                pass
         
-        meta['imdb_id'] = meta['code']
         if meta.has_key('cast'):
             meta['cast'] = str(meta['cast'])
         
@@ -598,24 +665,48 @@ class MetaData:
                 self.dbcur.execute("INSERT INTO " + table + " VALUES "
                                    "(:imdb_id, :tmdb_id, :title, :year, :director, :writer, :tagline, :cast, :rating, :duration, :plot, :mpaa, :premiered, :genre, :studio, :thumb_url, :cover_url, :trailer_url, :backdrop_url, :imgs_prepacked, :overlay)",
                                    meta
-                                   #"('%s', '%s', '%s', %s, %s, '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s')"
-                                   #% ( meta['code'], meta['tmdb_id'],meta['title'],meta['rating'],meta['duration'],meta['plot'],meta['mpaa'],
-                                   #meta['premiered'],meta['genre'],meta['studio'],meta['thumb_url'],meta['cover_url'],meta['trailer_url'],meta['backdrop_url'],meta['imgs_prepacked'], meta['watched'])
                 )
             elif type == self.type_tvshow:
                 self.dbcur.execute("INSERT INTO " + table + " VALUES "
                                    "(:imdb_id, :tvdb_id, :title, :cast, :rating, :duration, :plot, :mpaa, :premiered, :genre, :studio, :thumb_url, :cover_url, :trailer_url, :backdrop_url, :imgs_prepacked, :overlay)",
                                    meta
-                                   #"('%s', '%s', '%s', %s, %s, '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s')"
-                                   #% ( meta['code'], meta['tmdb_id'],meta['title'],meta['rating'],meta['duration'],meta['plot'],meta['mpaa'],
-                                   #meta['premiered'],meta['genre'],meta['studio'],meta['thumb_url'],meta['cover_url'],meta['trailer_url'],meta['backdrop_url'],meta['imgs_prepacked'], meta['watched'])
                 )
             self.dbcon.commit()
         except Exception, e:
-            print 'Error attempting to insert into cache table: %s ' % e
+            print '************* Error attempting to insert into cache table: %s ' % e
             print 'Meta data:', meta
             pass            
     
+    
+    def _cache_delete_video_meta(self, imdb_id, tmdb_id, name, year):
+        '''
+        Delete meta data from SQL table
+        
+        Args:
+            imdb_id (str): IMDB ID
+            tmdb_id (str): TMDB ID   
+            name (str): Full movie name
+            year (int): Movie year
+                        
+        '''         
+        if imdb_id:
+            sql_delete = "DELETE FROM movie_meta WHERE imdb_id = '%s'" % imdb_id
+        elif tmdb_id:
+            sql_delete = "DELETE FROM movie_meta WHERE tmdb_id = '%s'" % tmdb_id
+        else:
+            name =  self._clean_string(name.lower())
+            sql_delete = "DELETE FROM movie_meta WHERE title = '%s'" % name
+            if year:
+                sql_delete = sql_delete + ' AND year = %s' % (year)
+               
+        try:
+            print 'Deleting table entry: %s %s %s %s ' % (imdb_id, tmdb_id, name, year)
+            print 'SQL DELETE: %s' % sql_delete
+            self.dbcur.execute(sql_delete)
+        except Exception, e:
+            print '************* Error attempting to delete from cache table: %s ' % e          
+            pass    
+        
 
     def _get_tmdb_meta(self, imdb_id, tmdb_id, name, year=''):
         '''
@@ -640,103 +731,9 @@ class MetaData:
         if meta is None:
             # create an empty dict so below will at least populate empty data for the db insert.
             meta = {}
-        else:
-            if not imdb_id:
-                imdb_id = meta['code']
  
-        return meta
-     
+        return self._format_tmdb_meta(meta, imdb_id, name, year)
     
-    def _get_tvdb_meta(self, imdb_id, name, year=''):
-        '''
-        Requests meta data from TVDB and creates proper dict to send back
-        
-        Args:
-            imdb_id (str): IMDB ID
-            name (str): full name of movie you are searching
-        Kwargs:
-            year (str): 4 digit year of movie, when imdb_id is not available it is recommended
-                        to include the year whenever possible to maximize correct search results.
-                        
-        Returns:
-            DICT. It must also return an empty dict when
-            no movie meta info was found from tvdb because we should cache
-            these "None found" entries otherwise we hit tvdb alot.
-        '''      
-        print 'Starting TVDB Lookup'
-        tvdb = TheTVDB()
-        tvdb_id = ''
-        
-        if imdb_id:
-            tvdb_id = tvdb.get_show_by_imdb(imdb_id)
-
-        #Intialize tvshow meta dictionary
-        meta = self._init_tvshow_meta(imdb_id, tvdb_id, name)
-
-        # if not found by imdb, try by name
-        if tvdb_id == '':
-            show_list=tvdb.get_matching_shows(name)
-            print 'Found TV Show List: ', show_list
-            tvdb_id=''
-            prob_id=''
-            for show in show_list:
-                (junk1, junk2, junk3) = show
-                #if we match imdb_id or full name (with year) then we know for sure it is the right show
-                if junk3==imdb_id or self._string_compare(self._clean_string(junk2),self._clean_string(name)):
-                    tvdb_id=self._clean_string(junk1)
-                    imdb_id=self._clean_string(junk3)
-                    break
-                #if we match just the cleaned name (without year) keep the tvdb_id
-                elif self._string_compare(self._clean_string(junk2),self._clean_string(name)):
-                    prob_id = junk1
-                    imdb_id = self_clean_string(junk3)
-            if tvdb_id == '' and prob_id != '':
-                tvdb_id = self._clean_string(prob_id)
-
-        if tvdb_id:
-            print 'Show *** ' + name + ' *** found in TVdb. Getting details...'
-            show = tvdb.get_show(tvdb_id)
-            if show is not None:
-                meta['code'] = imdb_id
-                meta['tvdb_id'] = tvdb_id
-                meta['title'] = show.name
-                if str(show.rating) != '' and show.rating != None:
-                    meta['rating'] = show.rating
-                meta['duration'] = show.runtime
-                meta['plot'] = show.overview
-                meta['mpaa'] = show.content_rating
-                meta['premiered'] = show.first_aired
-                if show.genre != '':
-                    temp = show.genre.replace("|",",")
-                    temp = temp[1:(len(temp)-1)]
-                    meta['genre'] = temp
-                meta['studio'] = show.network
-                if show.actors:
-                    for actor in show.actors:
-                        meta['cast'].append(actor)
-                meta['thumb_url'] = show.banner_url
-                meta['imgs_prepacked'] = self.classmode
-                meta['cover_url'] = show.poster_url
-                meta['backdrop_url'] = show.fanart_url
-                meta['overlay'] = 6
-
-                if meta['plot'] == 'None' or meta['plot'] == '' or meta['plot'] == 'TBD' or meta['plot'] == 'No overview found.' or meta['rating'] == 0 or meta['duration'] == 0 or meta['cast'] == '' or meta['cover_url'] == '':
-                    print ' Some info missing in TVdb for TVshow *** '+ name + ' ***. Will search imdb for more'                    
-                    tmdb = TMDB()
-                    imdb_meta = tmdb.search_imdb(name, imdb_id)
-                    if imdb_meta:
-                        meta = tmdb.update_imdb_meta(meta, imdb_meta)
-
-                return meta
-            else:
-                tmdb = TMDB()
-                imdb_meta = tmdb.search_imdb(name, imdb_id)
-                if imdb_meta:
-                    meta = tmdb.update_imdb_meta(meta, imdb_meta)
-                return meta    
-        else:
-            return meta
-
 
     def _format_tmdb_meta(self, md, imdb_id, name, year):
         '''
@@ -758,7 +755,7 @@ class MetaData:
         #Intialize movie_meta dictionary    
         meta = self._init_movie_meta(imdb_id, md.get('id', ''), name, year)
         
-        meta['code'] = md.get('code', imdb_id)
+        meta['imdb_id'] = md.get('imdb_id', imdb_id)
         meta['title'] = md.get('name', name)      
         meta['tagline'] = md.get('tagline', '')
         meta['rating'] = md.get('rating', 0)
@@ -769,12 +766,7 @@ class MetaData:
         
         #Do whatever we can to set a year, if we don't have one lets try to strip it from premiered
         if not year and meta['premiered']:
-            try:
-                a = datetime.strptime(meta['premiered'], '%Y-%m-%d')
-                meta['year'] = a.strftime('%Y')
-            except Exception, e:
-                print 'Date conversion failed: %s' % e
-                pass   
+            meta['year'] = int(self._convert_date(meta['premiered'], '%Y-%m-%d', '%Y'))
                    
         meta['trailer_url'] = md.get('trailer', '')
         meta['genre'] = md.get('genre', '')
@@ -842,6 +834,97 @@ class MetaData:
 
         return meta
         
+        
+    def _get_tvdb_meta(self, imdb_id, name, year=''):
+        '''
+        Requests meta data from TVDB and creates proper dict to send back
+        
+        Args:
+            imdb_id (str): IMDB ID
+            name (str): full name of movie you are searching
+        Kwargs:
+            year (str): 4 digit year of movie, when imdb_id is not available it is recommended
+                        to include the year whenever possible to maximize correct search results.
+                        
+        Returns:
+            DICT. It must also return an empty dict when
+            no movie meta info was found from tvdb because we should cache
+            these "None found" entries otherwise we hit tvdb alot.
+        '''      
+        print 'Starting TVDB Lookup'
+        tvdb = TheTVDB()
+        tvdb_id = ''
+        
+        if imdb_id:
+            tvdb_id = tvdb.get_show_by_imdb(imdb_id)
+
+        #Intialize tvshow meta dictionary
+        meta = self._init_tvshow_meta(imdb_id, tvdb_id, name)
+
+        # if not found by imdb, try by name
+        if tvdb_id == '':
+            show_list=tvdb.get_matching_shows(name)
+            print 'Found TV Show List: ', show_list
+            tvdb_id=''
+            prob_id=''
+            for show in show_list:
+                (junk1, junk2, junk3) = show
+                #if we match imdb_id or full name (with year) then we know for sure it is the right show
+                if junk3==imdb_id or self._string_compare(self._clean_string(junk2),self._clean_string(name)):
+                    tvdb_id=self._clean_string(junk1)
+                    imdb_id=self._clean_string(junk3)
+                    break
+                #if we match just the cleaned name (without year) keep the tvdb_id
+                elif self._string_compare(self._clean_string(junk2),self._clean_string(name)):
+                    prob_id = junk1
+                    imdb_id = self_clean_string(junk3)
+            if tvdb_id == '' and prob_id != '':
+                tvdb_id = self._clean_string(prob_id)
+
+        if tvdb_id:
+            print 'Show *** ' + name + ' *** found in TVdb. Getting details...'
+            show = tvdb.get_show(tvdb_id)
+            if show is not None:
+                meta['imdb_id'] = imdb_id
+                meta['tvdb_id'] = tvdb_id
+                meta['title'] = show.name
+                if str(show.rating) != '' and show.rating != None:
+                    meta['rating'] = show.rating
+                meta['duration'] = show.runtime
+                meta['plot'] = show.overview
+                meta['mpaa'] = show.content_rating
+                meta['premiered'] = show.first_aired
+                if show.genre != '':
+                    temp = show.genre.replace("|",",")
+                    temp = temp[1:(len(temp)-1)]
+                    meta['genre'] = temp
+                meta['studio'] = show.network
+                if show.actors:
+                    for actor in show.actors:
+                        meta['cast'].append(actor)
+                meta['thumb_url'] = show.banner_url
+                meta['imgs_prepacked'] = self.classmode
+                meta['cover_url'] = show.poster_url
+                meta['backdrop_url'] = show.fanart_url
+                meta['overlay'] = 6
+
+                if meta['plot'] == 'None' or meta['plot'] == '' or meta['plot'] == 'TBD' or meta['plot'] == 'No overview found.' or meta['rating'] == 0 or meta['duration'] == 0 or meta['cast'] == '' or meta['cover_url'] == '':
+                    print ' Some info missing in TVdb for TVshow *** '+ name + ' ***. Will search imdb for more'                    
+                    tmdb = TMDB()
+                    imdb_meta = tmdb.search_imdb(name, imdb_id)
+                    if imdb_meta:
+                        meta = tmdb.update_imdb_meta(meta, imdb_meta)
+
+                return meta
+            else:
+                tmdb = TMDB()
+                imdb_meta = tmdb.search_imdb(name, imdb_id)
+                if imdb_meta:
+                    meta = tmdb.update_imdb_meta(meta, imdb_meta)
+                return meta    
+        else:
+            return meta
+
     
     def search_movies(self, name):
         '''
@@ -857,16 +940,23 @@ class MetaData:
             - Name
             - Year
         ''' 
+        print '---------------------------------------------------------------------------------------'
+        print 'Meta data refresh - searching for movie: %s' % name
         tmdb = TMDB()
         movie_list = []
         meta = tmdb.tmdb_search(name)
-        for movie in meta:
-            if movie['released']:
-                year = tmdb.convert_date(movie['released'], '%Y-%m-%d', '%Y')
-            else:
-                year = None
-            movie_list.append({'title': movie['name'], 'imdb_id': movie['imdb_id'], 'tmdb_id': movie['id'], 'year': year})
-        return movie_list
+        if meta:
+            for movie in meta:
+                if movie['released']:
+                    year = self._convert_date(movie['released'], '%Y-%m-%d', '%Y')
+                else:
+                    year = None
+                movie_list.append({'title': movie['name'], 'imdb_id': movie['imdb_id'], 'tmdb_id': movie['id'], 'year': year})
+                print 'Returning results: %s' % movie_list
+                return movie_list
+        else:
+            print 'No results found'
+            return None
     
             
     def get_episode_meta(self, imdb_id, season, episode):
@@ -882,12 +972,9 @@ class MetaData:
             DICT. It must also return an empty dict when
             no meta info was found in order to save these.
         '''  
-        
-        # Add the tt if not found. integer aware.
-        imdb_id=str(imdb_id)
-        if not imdb_id.startswith('tt'):
-                imdb_id = "tt%s" % imdb_id
-        
+        print '---------------------------------------------------------------------------------------'
+        print 'Attempting to retreive episode meta data for: %s %s %s' % (imdb_id, season, episode)
+               
         dateSearch = False
         searchTVDB = True
         
@@ -895,7 +982,7 @@ class MetaData:
         tvdb_id = self._get_tvdb_id(imdb_id)
         
         #Check if it exists in local cache first
-        meta = self._cache_lookup_episode(imdb_id, season, episode)#ep_num)
+        meta = self._cache_lookup_episode(imdb_id, tvdb_id, season, episode)
         
         #If not found lets scrape online sources
         if meta is None:
@@ -904,7 +991,7 @@ class MetaData:
                 print "Could not find TVshow with imdb " + imdb_id
                 
                 meta = {}
-                meta['code']=imdb_id
+                meta['imdb_id']=imdb_id
                 meta['tvdb_id']=''
                 meta['episode_id'] = ''                
                 meta['season']=season
@@ -948,7 +1035,7 @@ class MetaData:
                 meta['episode'] = 0
                 
             #if meta is not None:
-            meta['code']=imdb_id
+            meta['imdb_id']=imdb_id
             meta['tvdb_id']=tvdb_id
             meta['season']=int(season)
             meta['episode']=int(episode)
@@ -977,7 +1064,7 @@ class MetaData:
         Returns:
             DICT containing the extra values
         '''     
-        self.dbcur.execute("SELECT * FROM tvshow_meta WHERE imdb_id = '%s'" % meta['code']) #select database row where imdb_id matches
+        self.dbcur.execute("SELECT * FROM tvshow_meta WHERE imdb_id = '%s'" % meta['imdb_id'])
         matchedrow = self.dbcur.fetchone()
 
         if matchedrow:
@@ -1015,12 +1102,13 @@ class MetaData:
             return None
 
     
-    def _cache_lookup_episode(self, imdb_id, season, episode):
+    def _cache_lookup_episode(self, imdb_id, tvdb_id, season, episode):
         '''
         Lookup in local cache db for episode data
         
         Args:
             imdb_id (str): IMDB ID
+            tvdb_id (str): TheTVDB ID
             season (str): tv show season number, number only no other characters
             episode (str): tv show episode number, number only no other characters
                         
@@ -1038,7 +1126,7 @@ class MetaData:
                            'episode_meta.premiered as premiered, '
                            'tvshow_meta.studio as studio, '
                            'tvshow_meta.mpaa as mpaa, '
-                           'episode_meta.imdb_id as code, '
+                           'episode_meta.imdb_id as imdb_id, '
                            'episode_meta.rating as rating, '
                            '"" as trailer_url, '
                            'episode_meta.season as season, '
@@ -1048,7 +1136,7 @@ class MetaData:
                            'FROM episode_meta, tvshow_meta WHERE '
                            'episode_meta.imdb_id = tvshow_meta.imdb_id AND '
                            'episode_meta.tvdb_id = tvshow_meta.tvdb_id AND '
-                           'episode_meta.imdb_id = "%s" AND season = "%s" AND episode_meta.episode = "%s" ' % (imdb_id, season, episode) )
+                           'episode_meta.imdb_id = "%s" AND episode_meta.tvdb_id = "%s" AND season = %s AND episode_meta.episode = %s ' % (imdb_id, tvdb_id, season, episode) )
         matchedrow = self.dbcur.fetchone()
         if matchedrow:
             print 'Found episode meta information in cache table: ', dict(matchedrow)
@@ -1132,37 +1220,33 @@ class MetaData:
         '''      
         try: 
             self.dbcur.execute('SELECT * FROM episode_meta WHERE '
-                               'imdb_id = "%s" AND tvdb_id = "%s" AND season = %s AND episode = %s AND title = "%s"' 
-                               % (meta['code'], meta['tvdb_id'], meta['season'], meta['episode'], meta['title']) )
+                               'imdb_id = "%s" AND tvdb_id = "%s" AND season = %s AND episode = %s '
+                               % (meta['imdb_id'], meta['tvdb_id'], meta['season'], meta['episode']) )
             matchedrow = self.dbcur.fetchone()
             if matchedrow:
                     print 'Episode matched row found, deleting table entry'
                     self.dbcur.execute('DELETE FROM episode_meta WHERE '
-                               'imdb_id = "%s" AND tvdb_id = "%s" AND season = %s AND episode = %s AND title = "%s" ' 
-                               % (meta['code'], meta['tvdb_id'], meta['season'], meta['episode'], meta['title']) ) 
+                               'imdb_id = "%s" AND tvdb_id = "%s" AND season = %s AND episode = %s ' 
+                               % (meta['imdb_id'], meta['tvdb_id'], meta['season'], meta['episode']) ) 
         except Exception, e:
-            print 'Error attempting to delete from cache table: %s ' % e
+            print '************* Error attempting to delete from cache table: %s ' % e
             print 'Meta data:', meta
             pass        
         
         print 'Saving episode cache information: ', meta
         try:
-            meta['imdb_id'] = meta['code']
             self.dbcur.execute("INSERT INTO episode_meta VALUES "
                                "(:imdb_id, :tvdb_id, :episode_id, :season, :episode, :title, :director, :writer, :plot, :rating, :premiered, :poster, :overlay)",
                                meta
-                               #"('%s', '%s', '%s', %s, %s, '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s')"
-                               #% ( meta['code'], meta['tmdb_id'],meta['title'],meta['rating'],meta['duration'],meta['plot'],meta['mpaa'],
-                               #meta['premiered'],meta['genre'],meta['studio'],meta['thumb_url'],meta['cover_url'],meta['trailer_url'],meta['backdrop_url'],meta['imgs_prepacked'])
             )
             self.dbcon.commit()
         except Exception, e:
-            print 'Error attempting to insert into cache table: %s ' % e
+            print '************* Error attempting to insert into cache table: %s ' % e
             print 'Meta data:', meta
             pass        
 
 
-    def change_watched(self, type, name, imdb_id='', season='', year=''):
+    def change_watched(self, type, name, imdb_id, tmdb_id='', season='', episode='', year=''):
         '''
         Change watched status on video
         
@@ -1173,35 +1257,33 @@ class MetaData:
         Kwargs:            
             season (str): season number
                         
-        '''    
-        # add the tt if not found. integer aware.
-        imdb_id=str(imdb_id)
-        if not imdb_id.startswith('tt'):
-            imdb_id = "tt%s" % imdb_id
+        '''   
+        print '---------------------------------------------------------------------------------------'
+        print 'Updating watched flag for: %s %s %s %s %s %s' % (type, name, imdb_id, tmdb_id, season, year)
                 
         if type == self.type_movie or type == self.type_tvshow:
             watched = self._get_watched(imdb_id, type)
             if watched == 6:
-                self._update_watched(imdb_id, type, 7)
+                self._update_watched(imdb_id, type, 7, tmdb_id=tmdb_id)
             else:
-                self._update_watched(imdb_id, type, 6)
+                self._update_watched(imdb_id, type, 6, tmdb_id=tmdb_id)
         elif type == self.type_episode:
             tvdb_id = self._get_tvdb_id(imdb_id)
             if tvdb_id is None:
                 tvdb_id = ''
             tmp_meta = {}
-            tmp_meta['code'] = imdb_id
+            tmp_meta['imdb_id'] = imdb_id
             tmp_meta['tvdb_id'] = tvdb_id 
             tmp_meta['title'] = name
             tmp_meta['season']  = season
             watched = self._get_watched_episode(tmp_meta)
             if watched == 6:
-                self._update_watched(imdb_id, type, 7, name=name, season=season, tvdb_id=tvdb_id)
+                self._update_watched(imdb_id, type, 7, name=name, season=season, episode=episode, tvdb_id=tvdb_id)
             else:
-                self._update_watched(imdb_id, type, 6, name=name, season=season, tvdb_id=tvdb_id)
+                self._update_watched(imdb_id, type, 6, name=name, season=season, episode=episode, tvdb_id=tvdb_id)
                 
     
-    def _update_watched(self, imdb_id, type, new_value, name='', season='', tvdb_id=''):
+    def _update_watched(self, imdb_id, type, new_value, tmdb_id='', name='', season='', episode='', tvdb_id=''):
         '''
         Commits the DB update for the watched status
         
@@ -1216,20 +1298,24 @@ class MetaData:
 
         '''      
         if type == self.type_movie:
-            sql="UPDATE movie_meta SET overlay = %s WHERE imdb_id = '%s'" % (new_value, imdb_id)
+            if imdb_id:
+                sql="UPDATE movie_meta SET overlay = %s WHERE imdb_id = '%s'" % (new_value, imdb_id)
+            elif tmdb_id:
+                sql="UPDATE movie_meta SET overlay = %s WHERE tmdb_id = '%s'" % (new_value, tmdb_id)            
         elif type == self.type_tvshow:
             sql="UPDATE tvshow_meta SET overlay = %s WHERE imdb_id = '%s'" % (new_value, imdb_id)
         elif type == 'episode':
-            sql="UPDATE episode_meta SET overlay = '%s' WHERE imdb_id = '%s' AND tvdb_id = '%s' AND season = %s AND title = '%s'" % (new_value, imdb_id, tvdb_id, season, name)
+            sql="UPDATE episode_meta SET overlay = %s WHERE imdb_id = '%s' AND tvdb_id = '%s' AND season = %s AND episode = %s" % (new_value, imdb_id, tvdb_id, season, episode)
         else: # Something went really wrong
             return None
         
         try:
-            print 'Updating watched status for type: %s, imdb id: %s, new value: %s' % (type, imdb_id, new_value)
+            print 'Updating watched status for type: %s, imdb id: %s, tmdb_id: %s, new value: %s' % (type, imdb_id, tmdb_id, new_value)
+            print 'SQL UPDATE: %s' % sql
             self.dbcur.execute(sql)
             self.dbcon.commit()
         except Exception, e:
-            print 'Error attempting to update table: %s ' % e
+            print '************* Error attempting to update table: %s ' % e
             pass    
     
    
@@ -1251,7 +1337,7 @@ class MetaData:
             self.dbcur.execute("SELECT * FROM " + table + " WHERE imdb_id = '%s'" % imdb_id)
             matchedrow = self.dbcur.fetchone()
         except Exception, e:
-            print 'Error attempting to select from %s table: %s ' % (table, e)
+            print '************* Error attempting to select from %s table: %s ' % (table, e)
             pass  
                     
         if matchedrow:
@@ -1270,7 +1356,7 @@ class MetaData:
         '''     
         self.dbcur.execute('SELECT * FROM episode_meta WHERE ' +
                            'imdb_id = "%s" AND tvdb_id = "%s" AND season = "%s" AND title = "%s" ' 
-                           % (meta['code'], meta['tvdb_id'], meta['season'], meta['title']) )
+                           % (meta['imdb_id'], meta['tvdb_id'], meta['season'], meta['title']) )
         matchedrow = self.dbcur.fetchone()
         if matchedrow:
                 return dict(matchedrow)['overlay']
@@ -1338,7 +1424,7 @@ class MetaData:
                         
                 meta['season']=season
                 meta['tvdb_id'] = tvdb_id
-                meta['code'] = imdb_id
+                meta['imdb_id'] = imdb_id
                 meta['overlay'] = 6
                 
                 self._cache_save_season_meta(meta)
@@ -1385,27 +1471,26 @@ class MetaData:
         '''     
         try:
             self.dbcur.execute("SELECT * FROM season_meta WHERE imdb_id = '%s' AND season ='%s' " 
-                               % ( meta['code'], meta['season'] ) ) 
+                               % ( meta['imdb_id'], meta['season'] ) ) 
             matchedrow = self.dbcur.fetchone()
             if matchedrow:
                 print 'Season matched row found, deleting table entry'
                 self.dbcur.execute("DELETE FROM season_meta WHERE imdb_id = '%s' AND season ='%s' " 
-                                   % ( meta['code'], meta['season'] ) )
+                                   % ( meta['imdb_id'], meta['season'] ) )
         except Exception, e:
-            print 'Error attempting to delete from cache table: %s ' % e
+            print '************* Error attempting to delete from cache table: %s ' % e
             print 'Meta data:', meta
             pass 
                     
         print 'Saving season cache information: ', meta
         try:
-            meta['imdb_id'] = meta['code']
             self.dbcur.execute("INSERT INTO season_meta VALUES "
                                "(:imdb_id, :tvdb_id, :season, :cover_url, :overlay)",
                                meta
                                )
             self.dbcon.commit()
         except Exception, e:
-            print 'Error attempting to insert into cache table: %s ' % e
+            print '************* Error attempting to insert into cache table: %s ' % e
             print 'Meta data:', meta
             pass         
             
