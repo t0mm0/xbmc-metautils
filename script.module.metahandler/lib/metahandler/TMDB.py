@@ -84,19 +84,20 @@ class TMDB(object):
             return meta
 
 
-    def convert_date(self, string, in_format, out_format):
+    def _convert_date(self, string, in_format, out_format):
         ''' Helper method to convert a string date to a given format '''
         
         #Legacy check, Python 2.4 does not have strptime attribute, instroduced in 2.5
-        if hasattr(datetime, 'strptime'):
-            strptime = datetime.strptime
-        else:
-            strptime = lambda date_string, format: datetime(*(time.strptime(date_string, format)[0:6]))
+        #if hasattr(datetime, 'strptime'):
+        #    strptime = datetime.strptime
+        #else:
+        #    strptime = lambda date_string, format: datetime(*(time.strptime(date_string, format)[0:6]))
         
+        strptime = lambda date_string, format: datetime(*(time.strptime(date_string, format)[0:6]))
         try:
             a = strptime(string, in_format).strftime(out_format)
         except Exception, e:
-            print 'Date conversion failed: %s' % e
+            print '************* Error Date conversion failed: %s' % e
             return None
         return a
         
@@ -175,10 +176,10 @@ class TMDB(object):
         if self._upd_key(meta, 'released'):
             print '-- IMDB - Updating Premiered'
             
-            temp=self.convert_date(imdb_meta['Released'], '%d %b %Y', '%Y-%m-%d')
+            temp=self._convert_date(imdb_meta['Released'], '%d %b %Y', '%Y-%m-%d')
             #May have failed, lets try a different format
             if not temp:
-                temp=self.convert_date(imdb_meta['Released'], '%b %Y', '%Y-%m-%d')
+                temp=self._convert_date(imdb_meta['Released'], '%b %Y', '%Y-%m-%d')
             
             if temp:
                 meta['released'] = temp
@@ -221,7 +222,7 @@ class TMDB(object):
                         dur = dur + int(scrape[0])
                 meta['runtime']=str(dur)
         
-        meta['code'] = imdb_meta['ID']
+        meta['imdb_id'] = imdb_meta['ID']
         return meta
 
 
@@ -255,7 +256,7 @@ class TMDB(object):
         Returns:
             DICT of matches
         '''
-        return self._do_request_all('Movie.search',name)
+        return self._do_request_all('Movie.search',urllib.quote(name))
         
         
     def tmdb_lookup(self, name, imdb_id='', tmdb_id='', year=''):
@@ -316,5 +317,4 @@ class TMDB(object):
             if imdb_meta:
                 meta = self.update_imdb_meta({}, imdb_meta)
        
-        meta['code'] = imdb_id
         return meta
