@@ -521,6 +521,8 @@ class MetaData:
         Returns:
             DICT of meta data or None if cannot be found.
         '''
+        print '---------------------------------------------------------------------------------------'
+        print 'Updating meta data: %s Old: %s %s New: %s %s Year: %s' % (name, old_imdb_id, old_tmdb_id, new_imdb_id, new_tmdb_id, year)
         
         if old_imdb_id:
             meta = self._cache_lookup_by_id('movie', imdb_id=old_imdb_id)
@@ -530,7 +532,9 @@ class MetaData:
             meta = self._cache_lookup_by_name('movie', name, year)
         
         if meta:
-            self._cache_delete_video_meta(meta['imdb_id'], meta['tmdb_id'], meta['title'], meta['year'])
+            self._cache_delete_video_meta(old_imdb_id, old_tmdb_id, name, year)
+        else:
+            print 'No match found in cache db'
             
         return self.get_meta(self.type_movie, name, new_imdb_id, new_tmdb_id, year)
         
@@ -557,7 +561,8 @@ class MetaData:
             sql_select = "SELECT * FROM %s WHERE imdb_id = '%s'" % (table, imdb_id)  
         else:
             sql_select = "SELECT * FROM %s WHERE tmdb_id = '%s'" % (table, tmdb_id)  
-
+        
+        print 'Looking up in local cache by id for: %s %s %s' % (type, imdb_id, tmdb_id)
         print 'SQL Select: %s' % sql_select        
         try:    
             self.dbcur.execute(sql_select)
@@ -592,15 +597,22 @@ class MetaData:
             table='movie_meta'
         elif type == self.type_tvshow:
             table='tvshow_meta'
-        name = name.replace("'","''")
         
         name =  self._clean_string(name.lower())
-        sql_select = "SELECT * FROM " + table + " WHERE title = '%s'" % name       
+        print 'Looking up in local cache by name for: %s %s %s' % (type, name, year)
+        
+        sql_select = "SELECT * FROM %s WHERE title = '%s'" % (table, name)
         if year:
             sql_select = sql_select + " AND year = %s" % year
         print 'SQL Select: %s' % sql_select            
-        self.dbcur.execute(sql_select)            
-        matchedrow = self.dbcur.fetchone()
+        
+        try:
+            self.dbcur.execute(sql_select)            
+            matchedrow = self.dbcur.fetchone()
+        except Exception, e:
+            print '************* Error attempting to select from table: %s with error: %s' % (table, e)
+            pass
+            
         if matchedrow:
             print 'Found meta information by name in cache table: ', dict(matchedrow)
             return dict(matchedrow)
@@ -952,12 +964,13 @@ class MetaData:
                 else:
                     year = None
                 movie_list.append({'title': movie['name'], 'imdb_id': movie['imdb_id'], 'tmdb_id': movie['id'], 'year': year})
-                print 'Returning results: %s' % movie_list
-                return movie_list
         else:
             print 'No results found'
             return None
-    
+ 
+        print 'Returning results: %s' % movie_list
+        return movie_list
+
             
     def get_episode_meta(self, imdb_id, season, episode):
         '''
@@ -1063,9 +1076,17 @@ class MetaData:
                         
         Returns:
             DICT containing the extra values
-        '''     
-        self.dbcur.execute("SELECT * FROM tvshow_meta WHERE imdb_id = '%s'" % meta['imdb_id'])
-        matchedrow = self.dbcur.fetchone()
+        '''
+        sql_select = "SELECT * FROM tvshow_meta WHERE imdb_id = '%s'" % meta['imdb_id']
+        print 'Retrieving extra TV Show information from tvshow_meta'
+        print 'SQL SELECT: %s' % sql_select
+        
+        try:     
+            self.dbcur.execute(sql_select)
+            matchedrow = self.dbcur.fetchone()
+        except Exception, e:
+            print '************* Error attempting to select from tvshow_meta table: %s ' % e          
+            pass   
 
         if matchedrow:
             match = dict(matchedrow)
@@ -1094,8 +1115,17 @@ class MetaData:
         Returns:
             (str) imdb_id 
         '''      
-        self.dbcur.execute("SELECT * FROM tvshow_meta WHERE imdb_id = '%s'" % imdb_id) #select database row where imdb_id matches
-        matchedrow = self.dbcur.fetchone()
+        sql_select = "SELECT * FROM tvshow_meta WHERE imdb_id = '%s'" % imdb_id
+        print 'Retrieving TVDB ID'
+        print 'SQL SELECT: %s' % sql_select
+        
+        try:
+            self.dbcur.execute(sql_select)
+            matchedrow = self.dbcur.fetchone()
+        except Exception, e:
+            print '************* Error attempting to select from tvshow_meta table: %s ' % e          
+            pass
+                        
         if matchedrow:
                 return dict(matchedrow)['tvdb_id']
         else:
@@ -1116,6 +1146,7 @@ class MetaData:
             DICT. Returns results found or None.
         ''' 
         print 'Looking up episode data in cache db, imdb id: %s season: %s episode: %s' % (imdb_id, season, episode) 
+        
         self.dbcur.execute('SELECT '
                            'episode_meta.title as title, '
                            'episode_meta.plot as plot, '
@@ -1290,7 +1321,7 @@ class MetaData:
         Args:
             imdb_id (str): IMDB ID
             type (str): type of video to update, 'movie', 'tvshow' or 'episode'
-            new_value (str): value to update overlay field with
+            new_value (int): value to update overlay field with
         Kwargs:
             name (str): name of video        
             season (str): season number

@@ -312,7 +312,6 @@ class TMDB(object):
         
         #If all else fails, and we don't have a TMDB id
         else:
-            meta = {}
             imdb_meta = self.search_imdb(name, imdb_id, year)
             if imdb_meta:
                 meta = self.update_imdb_meta({}, imdb_meta)
